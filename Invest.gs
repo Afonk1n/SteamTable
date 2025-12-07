@@ -316,6 +316,9 @@ function invest_formatTable() {
     sheet.getRange(`K2:L${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT)
     sheet.getRange(`O2:P${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
     sheet.getRange(`R2:R${lastRow}`).setNumberFormat(NUMBER_FORMATS.INTEGER)
+    // Форматирование колонки Потенциал (S) как процент с знаком "+"
+    const potentialCol = getColumnIndex(INVEST_COLUMNS.POTENTIAL)
+    sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1).setNumberFormat('+0%;-0%;"—"')
 
     const dataRange = sheet.getRange(DATA_START_ROW, 1, lastRow - 1, headers.length)
     dataRange.setVerticalAlignment('middle').setWrap(true)

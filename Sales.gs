@@ -26,6 +26,9 @@ function sales_formatNewRow_(sheet, row) {
   sheet.getRange(`H${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min цена
   sheet.getRange(`I${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Max цена
   sheet.getRange(`K${row}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Дней смены
+  // Форматирование колонки Потенциал (L) как процент с знаком "+"
+  const potentialCol = getColumnIndex(SALES_COLUMNS.POTENTIAL)
+  sheet.getRange(row, potentialCol).setNumberFormat('+0%;-0%;"—"')
   
   // Добавляем изображение и ссылку
   setImageAndLink_(sheet, row, SALES_CONFIG.STEAM_APPID, name, SALES_CONFIG.COLUMNS)
@@ -135,6 +138,9 @@ function sales_formatTable() {
     sheet.getRange(`E2:E${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT)
     sheet.getRange(`H2:I${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
     sheet.getRange(`K2:K${lastRow}`).setNumberFormat(NUMBER_FORMATS.INTEGER)
+    // Форматирование колонки Потенциал (L) как процент с знаком "+"
+    const potentialCol = getColumnIndex(SALES_COLUMNS.POTENTIAL)
+    sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1).setNumberFormat('+0%;-0%;"—"')
 
     sheet
       .getRange(DATA_START_ROW, 1, lastRow - 1, headers.length)

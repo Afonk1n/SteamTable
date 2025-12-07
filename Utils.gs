@@ -359,6 +359,16 @@ function unified_priceUpdate() {
   let updateExecuted = false
   try {
     const historyCompleted = history_updatePricesForPeriod(period)
+    
+    // Если historyCompleted === false, это может означать:
+    // 1. Колонка еще не создана (нормально для unified_priceUpdate, который может сработать до создания колонки)
+    // 2. Нет данных для обновления
+    // В этом случае просто выходим без ошибки
+    if (historyCompleted === false) {
+      console.log(`Unified: обновление цен не выполнено (колонка еще не создана или нет данных)`)
+      return
+    }
+    
     syncPricesFromHistoryToInvestAndSales()
     
     if (historyCompleted) {
@@ -750,11 +760,14 @@ function getOrCreateAutoLogSheet_() {
 
 function logAutoAction_(sheetName, action, status = 'OK') {
   const sheet = getOrCreateAutoLogSheet_()
-  const row = sheet.getLastRow() + 1
+  // Вставляем новую строку сразу после заголовка (строка 2)
+  // Существующие строки автоматически сдвигаются вниз
+  const insertRow = HEADER_ROW + 1
+  sheet.insertRowAfter(HEADER_ROW)
   const now = new Date()
-  sheet.getRange(row, 1, 1, 4).setValues([[now, sheetName, action, status]])
-  sheet.getRange(row, 1).setNumberFormat('dd.MM.yyyy HH:mm')
-  sheet.getRange(row, 1, 1, 4).setVerticalAlignment('middle').setHorizontalAlignment('center')
+  sheet.getRange(insertRow, 1, 1, 4).setValues([[now, sheetName, action, status]])
+  sheet.getRange(insertRow, 1).setNumberFormat('dd.MM.yyyy HH:mm')
+  sheet.getRange(insertRow, 1, 1, 4).setVerticalAlignment('middle').setHorizontalAlignment('center')
 }
 
 
@@ -784,10 +797,13 @@ function getOrCreateLogSheet_() {
 
 function logOperation_(type, itemName, quantity, pricePerUnit, total, source) {
   const sheet = getOrCreateLogSheet_()
-  const row = sheet.getLastRow() + 1
+  // Вставляем новую строку сразу после заголовка (строка 2)
+  // Существующие строки автоматически сдвигаются вниз
+  const insertRow = HEADER_ROW + 1
+  sheet.insertRowAfter(HEADER_ROW)
   const now = new Date()
   // Порядок колонок: A Дата, B Тип, C Изображение, D Предмет, E Кол-во, F Цена за шт, G Сумма, H Источник
-  sheet.getRange(row, 1, 1, 2).setValues([[now, type]])
+  sheet.getRange(insertRow, 1, 1, 2).setValues([[now, type]])
   
   // Используем тот же механизм изображений, что и в других листах
   const logConfig = {
@@ -795,21 +811,21 @@ function logOperation_(type, itemName, quantity, pricePerUnit, total, source) {
     NAME: 'D',
     LINK: 'G' // Используем колонку G для ссылки
   }
-  setImageAndLink_(sheet, row, 570, itemName, logConfig)
+  setImageAndLink_(sheet, insertRow, 570, itemName, logConfig)
   
-  sheet.getRange(row, 4, 1, 4).setValues([[itemName, quantity, pricePerUnit, total]])
-  sheet.getRange(row, 8).setValue(source)
+  sheet.getRange(insertRow, 4, 1, 4).setValues([[itemName, quantity, pricePerUnit, total]])
+  sheet.getRange(insertRow, 8).setValue(source)
   
   // Форматы и выравнивания
-  sheet.getRange(row, 1).setNumberFormat('dd.MM.yyyy HH:mm')
-  sheet.getRange(row, 1, 1, 8).setVerticalAlignment('middle').setHorizontalAlignment('center')
-  sheet.getRange(row, 4).setHorizontalAlignment('left')
-  sheet.getRange(row, 5).setNumberFormat('0')
-  sheet.getRange(row, 6).setNumberFormat('#,##0.00 ₽')
-  sheet.getRange(row, 7).setNumberFormat('#,##0.00 ₽')
+  sheet.getRange(insertRow, 1).setNumberFormat('dd.MM.yyyy HH:mm')
+  sheet.getRange(insertRow, 1, 1, 8).setVerticalAlignment('middle').setHorizontalAlignment('center')
+  sheet.getRange(insertRow, 4).setHorizontalAlignment('left')
+  sheet.getRange(insertRow, 5).setNumberFormat('0')
+  sheet.getRange(insertRow, 6).setNumberFormat('#,##0.00 ₽')
+  sheet.getRange(insertRow, 7).setNumberFormat('#,##0.00 ₽')
   
   // Устанавливаем высоту строки для изображения
-  sheet.setRowHeight(row, 85)
+  sheet.setRowHeight(insertRow, 85)
 }
 
 function highlightDuplicatesByName_(sheet, nameColIndex, color) {
@@ -1089,7 +1105,7 @@ function syncExtendedAnalyticsFromHistoryUniversal_(targetSheet, phaseColIndex, 
       
       if (updateAll || !outPhase[i][0]) {
         outPhase[i][0] = '❓'
-        outPotential[i][0] = '—'
+        outPotential[i][0] = null  // null вместо '—' для числового формата
         outRecommendation[i][0] = '👀 НАБЛЮДАТЬ'
         updatedCount++
       }
@@ -1112,9 +1128,15 @@ function syncExtendedAnalyticsFromHistoryUniversal_(targetSheet, phaseColIndex, 
     for (let i = 0; i < historyNames.length; i++) {
       const hName = String(historyNames[i][0] || '').trim()
       if (hName) {
+        // Потенциал теперь хранится как число (процент в виде десятичной дроби, например 0.14 для +14%)
+        // Если значение null или строка '—', используем null
+        let potentialValue = historyPotential[i][0]
+        if (potentialValue === '—' || potentialValue === null || potentialValue === '') {
+          potentialValue = null
+        }
         historyMap.set(hName, {
           phase: historyPhase[i][0] || '❓',
-          potential: historyPotential[i][0] || '—',
+          potential: potentialValue,
           recommendation: historyRecommendation[i][0] || '👀 НАБЛЮДАТЬ'
         })
       }
@@ -1141,7 +1163,7 @@ function syncExtendedAnalyticsFromHistoryUniversal_(targetSheet, phaseColIndex, 
       } else {
         // Предмет не найден в History - ставим значения по умолчанию
         outPhase[i][0] = '❓'
-        outPotential[i][0] = '—'
+        outPotential[i][0] = null  // null вместо '—' для числового формата
         outRecommendation[i][0] = '👀 НАБЛЮДАТЬ'
         updatedCount++
       }

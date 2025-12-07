@@ -41,6 +41,10 @@ function history_formatTable() {
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
     // Форматирование числовых колонок
     sheet.getRange(`F2:H${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
+    // Форматирование колонки Потенциал (L) как процент с знаком "+"
+    const potentialCol = getColumnIndex(HISTORY_COLUMNS.POTENTIAL)
+    sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1)
+      .setNumberFormat('+0%;-0%;"—"')
   }
 
   sheet.setFrozenRows(HEADER_ROW)
@@ -102,8 +106,10 @@ function history_updateAllAnalytics_() {
   const sheet = getOrCreateHistorySheet_()
   history_updateCurrentPriceMinMax_(sheet)
   history_updateTrends()
-  history_highlightMinMax_(sheet)
+  // ВАЖНО: Сначала применяем условное форматирование (для трендов, фаз, рекомендаций),
+  // затем выделение min/max, чтобы оно не перезаписывалось условным форматированием
   history_applyAllConditionalFormatting_(sheet)
+  history_highlightMinMax_(sheet)
 }
 
 // Гарантировать наличие колонки для текущего периода (ночь/день)
@@ -146,12 +152,16 @@ function history_ensurePeriodColumn(period) {
     throw new Error(`Колонка "день" может быть создана только после ${UPDATE_INTERVALS.EVENING_HOUR}:${UPDATE_INTERVALS.EVENING_MINUTE.toString().padStart(2, '0')}. Текущее время: ${hour}:${minutesStr}`)
   }
   
-  // Проверка времени для колонки "ночь": должна создаваться только с 00:10 до 12:00
+  // Проверка времени для колонки "ночь": должна создаваться с 00:00 до 12:00
+  // Примечание: триггер срабатывает в 00:00, но проверка времени была строгой (00:10)
+  // Изменено: разрешаем создание с 00:00, так как триггер не может быть настроен на точные минуты
   if (period === PRICE_COLLECTION_PERIODS.MORNING) {
-    const isWithinMorningPeriod = currentTimeMinutes >= morningStartMinutes && currentTimeMinutes < eveningStartMinutes
+    // Разрешаем создание колонки "ночь" с 00:00 до 12:00 (вместо строго 00:10)
+    // Это предотвращает ошибки, когда триггер срабатывает в 00:00
+    const isWithinMorningPeriod = (hour === 0 && minutes >= 0) || (hour > 0 && hour < UPDATE_INTERVALS.EVENING_HOUR) || (hour === UPDATE_INTERVALS.EVENING_HOUR && minutes === 0)
     if (!isWithinMorningPeriod) {
-      console.log(`History: попытка создать колонку "ночь" вне допустимого времени (текущее время: ${hour}:${minutesStr}, требуется ${UPDATE_INTERVALS.MORNING_HOUR}:${UPDATE_INTERVALS.MORNING_MINUTE.toString().padStart(2, '0')}-${UPDATE_INTERVALS.EVENING_HOUR}:${UPDATE_INTERVALS.EVENING_MINUTE.toString().padStart(2, '0')})`)
-      throw new Error(`Колонка "ночь" может быть создана только с ${UPDATE_INTERVALS.MORNING_HOUR}:${UPDATE_INTERVALS.MORNING_MINUTE.toString().padStart(2, '0')} до ${UPDATE_INTERVALS.EVENING_HOUR}:${UPDATE_INTERVALS.EVENING_MINUTE.toString().padStart(2, '0')}. Текущее время: ${hour}:${minutesStr}`)
+      console.log(`History: попытка создать колонку "ночь" вне допустимого времени (текущее время: ${hour}:${minutesStr}, требуется 00:00-12:00)`)
+      throw new Error(`Колонка "ночь" может быть создана только с 00:00 до 12:00. Текущее время: ${hour}:${minutesStr}`)
     }
   }
 
@@ -222,7 +232,18 @@ function history_ensureTodayColumn() {
 // Обновление цен для указанного периода
 function history_updatePricesForPeriod(period) {
   const sheet = getOrCreateHistorySheet_()
-  const periodCol = history_ensurePeriodColumn(period)
+  
+  // Пытаемся получить или создать колонку периода
+  // Если колонка не может быть создана (например, из-за проверки времени) - возвращаем false
+  let periodCol
+  try {
+    periodCol = history_ensurePeriodColumn(period)
+  } catch (e) {
+    // Если колонка не может быть создана (например, преждевременная попытка) - просто возвращаем false
+    // Это нормально для unified_priceUpdate, который может сработать до создания колонки
+    console.log(`History: не удалось получить колонку периода ${period}: ${e.message}`)
+    return false
+  }
 
   const lastRow = sheet.getLastRow()
   if (lastRow <= 1 || !periodCol || periodCol < HISTORY_COLUMNS.FIRST_DATE_COL) return false
@@ -440,13 +461,17 @@ function history_formatPriceColumn_(sheet, colIndex) {
 function history_highlightMinMax_(sheet) {
   const lastRow = sheet.getLastRow()
   const lastCol = sheet.getLastColumn()
-  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 11
+  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 14 (колонка N)
   
   if (lastRow <= 1 || lastCol < firstDateCol) return
 
   // Сбрасываем все фоны в диапазоне цен целиком (более надежно)
+  // Важно: сбрасываем только в диапазоне колонок с датами, не затрагивая другие колонки
   const priceDataRange = sheet.getRange(DATA_START_ROW, firstDateCol, lastRow - 1, lastCol - firstDateCol + 1)
   priceDataRange.setBackground(null)
+  
+  // Дополнительно убеждаемся, что нет фона в других колонках строк (на случай если где-то применялось форматирование строк)
+  // Но не трогаем колонки с данными (A-M), так как там может быть другое форматирование
 
   let processedRows = 0
   let skippedRows = 0
@@ -635,16 +660,88 @@ function history_analyzeTrend(row) {
   
   if (lastCol < firstDateCol) return { trend: '🟪', daysChange: 0 }
 
-  // Собираем цены для анализа
-  const prices = []
-  const dates = []
+  // Собираем цены для анализа, группируя по дате (игнорируя период ночь/день)
+  // Используем Map для группировки: ключ - дата (строка dd.MM.yy), значение - последняя цена за этот день
+  const pricesByDate = new Map()
+  const dateHeaders = []
   
+  // Собираем все цены с их датами и колонками
+  const priceEntries = []
   for (let col = firstDateCol; col <= lastCol; col++) {
     const value = sheet.getRange(row, col).getValue()
-    const date = sheet.getRange(1, col).getValue()
-    if (typeof value === 'number' && !isNaN(value) && value > 0) {
-      prices.push(value)
-      dates.push(date)
+    const headerDisplay = sheet.getRange(HEADER_ROW, col).getDisplayValue()
+    if (typeof value === 'number' && !isNaN(value) && value > 0 && headerDisplay) {
+      // Извлекаем дату из заголовка (формат: "dd.MM.yy ночь" или "dd.MM.yy день" или просто "dd.MM.yy")
+      const headerStr = String(headerDisplay).trim()
+      const dateMatch = headerStr.match(/^(\d{2}\.\d{2}\.\d{2})/)
+      if (dateMatch) {
+        const dateKey = dateMatch[1] // Ключ даты без периода
+        // Определяем период (ночь или день) для правильной сортировки
+        const isDay = headerStr.includes('день')
+        const isNight = headerStr.includes('ночь')
+        // Сохраняем все записи для последующей группировки
+        priceEntries.push({
+          dateKey,
+          value,
+          col,
+          isDay,
+          isNight,
+          isAfter: isDay || (!isNight && !isDay) // день идет после ночи
+        })
+        if (!dateHeaders.includes(dateKey)) {
+          dateHeaders.push(dateKey)
+        }
+      }
+    }
+  }
+  
+  // Группируем по дате, беря последнюю цену за день
+  // Если колонки идут слева направо (старые -> новые), последняя колонка для даты = последняя цена
+  // Сортируем записи по колонке (позиции), чтобы последняя колонка для каждой даты была последней
+  priceEntries.sort((a, b) => a.col - b.col)
+  
+  // Теперь для каждой даты последняя запись в массиве = последняя цена за день
+  for (const entry of priceEntries) {
+    pricesByDate.set(entry.dateKey, entry.value)
+  }
+
+  // Преобразуем Map в массивы цен и дат (в хронологическом порядке)
+  // ВАЖНО: Сортируем даты в хронологическом порядке перед созданием массивов
+  const sortedDateKeys = dateHeaders.sort((a, b) => {
+    // Сравниваем даты в формате dd.MM.yy
+    const partsA = a.split('.')
+    const partsB = b.split('.')
+    if (partsA.length !== 3 || partsB.length !== 3) return 0
+    
+    const yearA = 2000 + parseInt(partsA[2], 10)
+    const yearB = 2000 + parseInt(partsB[2], 10)
+    if (yearA !== yearB) return yearA - yearB
+    
+    const monthA = parseInt(partsA[1], 10)
+    const monthB = parseInt(partsB[1], 10)
+    if (monthA !== monthB) return monthA - monthB
+    
+    const dayA = parseInt(partsA[0], 10)
+    const dayB = parseInt(partsB[0], 10)
+    return dayA - dayB
+  })
+  
+  const prices = []
+  const dates = []
+  for (const dateKey of sortedDateKeys) {
+    const price = pricesByDate.get(dateKey)
+    if (price) {
+      prices.push(price)
+      // Преобразуем строку даты в объект Date для расчета разницы
+      const dateParts = dateKey.split('.')
+      if (dateParts.length === 3) {
+        const day = parseInt(dateParts[0], 10)
+        const month = parseInt(dateParts[1], 10) - 1 // месяцы в JS начинаются с 0
+        const year = 2000 + parseInt(dateParts[2], 10) // предполагаем формат yy -> 20yy
+        dates.push(new Date(year, month, day))
+      } else {
+        dates.push(new Date()) // fallback
+      }
     }
   }
 
@@ -798,8 +895,9 @@ function history_calculateMA_(prices, window) {
 // Расчет количества дней с последней смены тренда
 function history_calculateDaysChange_(prices, dates, currentTrend) {
   if (prices.length < 3) return 0
+  if (dates.length < 2) return 0
   
-  // Анализируем тренды для каждого периода
+  // Анализируем тренды для каждого периода, начиная с предпоследнего
   for (let i = prices.length - 2; i >= 1; i--) {
     const periodPrices = prices.slice(0, i + 1)
     const periodTrend = history_simpleComparison_(periodPrices)
@@ -811,12 +909,24 @@ function history_calculateDaysChange_(prices, dates, currentTrend) {
       
       if (changeDate instanceof Date && currentDate instanceof Date) {
         const diffTime = Math.abs(currentDate - changeDate)
-        return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+        const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+        return daysDiff > 0 ? daysDiff : 1 // Минимум 1 день
       }
     }
   }
   
-  return prices.length // если тренд не менялся, возвращаем общее количество дней
+  // Если тренд не менялся, вычисляем разницу между первой и последней датой
+  if (dates.length >= 2) {
+    const firstDate = dates[0]
+    const lastDate = dates[dates.length - 1]
+    if (firstDate instanceof Date && lastDate instanceof Date) {
+      const diffTime = Math.abs(lastDate - firstDate)
+      const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      return daysDiff > 0 ? daysDiff : 1 // Минимум 1 день
+    }
+  }
+  
+  return 0 // Если не удалось вычислить
 }
 
 // Обновление трендов для всех строк (оптимизированная версия)
@@ -861,12 +971,60 @@ function history_updateTrends() {
     const row = i + 2
     const analysis = history_analyzeTrend(row)
     
-    // Собираем цены для расширенного анализа (из колонок дат N и далее)
-    const prices = []
+    // Собираем цены для расширенного анализа с группировкой по дате (как в history_analyzeTrend)
+    // ВАЖНО: Используем ту же логику группировки, что и для расчета тренда
+    const pricesByDate = new Map()
+    const dateHeaders = []
+    const priceEntries = []
+    
     for (let col = firstDateCol; col <= lastCol; col++) {
       const value = sheet.getRange(row, col).getValue()
-      if (typeof value === 'number' && !isNaN(value) && value > 0) {
-        prices.push(value)
+      const headerDisplay = sheet.getRange(HEADER_ROW, col).getDisplayValue()
+      if (typeof value === 'number' && !isNaN(value) && value > 0 && headerDisplay) {
+        const headerStr = String(headerDisplay).trim()
+        const dateMatch = headerStr.match(/^(\d{2}\.\d{2}\.\d{2})/)
+        if (dateMatch) {
+          const dateKey = dateMatch[1]
+          priceEntries.push({
+            dateKey,
+            value,
+            col
+          })
+          if (!dateHeaders.includes(dateKey)) {
+            dateHeaders.push(dateKey)
+          }
+        }
+      }
+    }
+    
+    // Группируем по дате, беря последнюю цену за день
+    priceEntries.sort((a, b) => a.col - b.col)
+    for (const entry of priceEntries) {
+      pricesByDate.set(entry.dateKey, entry.value)
+    }
+    
+    // Сортируем даты в хронологическом порядке
+    const sortedDateKeys = dateHeaders.sort((a, b) => {
+      const partsA = a.split('.')
+      const partsB = b.split('.')
+      if (partsA.length !== 3 || partsB.length !== 3) return 0
+      const yearA = 2000 + parseInt(partsA[2], 10)
+      const yearB = 2000 + parseInt(partsB[2], 10)
+      if (yearA !== yearB) return yearA - yearB
+      const monthA = parseInt(partsA[1], 10)
+      const monthB = parseInt(partsB[1], 10)
+      if (monthA !== monthB) return monthA - monthB
+      const dayA = parseInt(partsA[0], 10)
+      const dayB = parseInt(partsB[0], 10)
+      return dayA - dayB
+    })
+    
+    // Создаем массив цен в хронологическом порядке (по одной цене на день)
+    const prices = []
+    for (const dateKey of sortedDateKeys) {
+      const price = pricesByDate.get(dateKey)
+      if (price) {
+        prices.push(price)
       }
     }
     
@@ -878,7 +1036,8 @@ function history_updateTrends() {
     if (prices.length >= 7) {
       phases[i][0] = history_determineCyclePhase_(prices)
       const potential = history_calculateGrowthPotential_(prices)
-      potentials[i][0] = potential ? `+${potential.to85th}%` : '—'
+      // Храним числовое значение для сортировки (в процентах, например 14 для +14%)
+      potentials[i][0] = potential ? potential.to85th / 100 : null
       recommendations[i][0] = history_generateRecommendation_(
         phases[i][0],
         trends[i][0],
@@ -887,7 +1046,7 @@ function history_updateTrends() {
       )
     } else {
       phases[i][0] = '❓'
-      potentials[i][0] = '—'
+      potentials[i][0] = null
       recommendations[i][0] = '👀 НАБЛЮДАТЬ'
     }
     
@@ -954,11 +1113,14 @@ function history_ensureExtendedAnalyticsColumns_() {
   sheet.setColumnWidth(potentialCol, 100)  // Потенциал
   sheet.setColumnWidth(recommendationCol, 130) // Рекомендация
   
-  // Центрирование данных
+  // Центрирование данных и форматирование
   if (lastRow > 1) {
     sheet.getRange(DATA_START_ROW, phaseCol, lastRow - 1, 3)
       .setHorizontalAlignment('center')
       .setVerticalAlignment('middle')
+    // Форматируем колонку Потенциал как процент с знаком "+" для положительных значений
+    sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1)
+      .setNumberFormat('+0%;-0%;"—"')
   }
 }
 
