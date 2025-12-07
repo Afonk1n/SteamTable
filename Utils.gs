@@ -284,8 +284,27 @@ function history_createPeriodAndUpdate() {
   
   let updateExecuted = false
   try {
+    // Сохраняем lastCol до создания колонки, чтобы определить, была ли создана новая
+    const historySheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+    const lastColBefore = historySheet ? historySheet.getLastColumn() : 0
+    
     // Создаём колонку для текущего периода (с проверкой времени внутри функции)
     history_ensurePeriodColumn(period)
+    
+    // Логируем начало обновления цен и обновляем текущие цены (окраска желтым) только если была создана новая колонка
+    const lastColAfter = historySheet ? historySheet.getLastColumn() : 0
+    if (lastColAfter > lastColBefore) {
+      const periodLabel = period === PRICE_COLLECTION_PERIODS.MORNING ? 'ночь' : 'день'
+      logAutoAction_('History', `Начало обновления цен (${periodLabel})`, 'OK')
+      
+      // Обновляем текущие цены сразу после создания новой колонки, чтобы устаревшие цены окрасились в желтый
+      try {
+        history_updateCurrentPriceMinMax_(historySheet)
+        console.log(`Unified: текущие цены обновлены и окрашены после создания новой колонки`)
+      } catch (e) {
+        console.error('Unified: ошибка при обновлении текущих цен:', e)
+      }
+    }
     
     // Обновляем цены в History для текущего периода
     const historyCompleted = history_updatePricesForPeriod(period)

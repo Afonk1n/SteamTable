@@ -191,6 +191,12 @@ function history_ensurePeriodColumn(period) {
       sheet.getRange(HEADER_ROW, newNightCol).setValue(nightLabel)
       history_formatPriceColumn_(sheet, newNightCol)
       
+      // ВАЖНО: Сбрасываем фон для всех ячеек новой колонки, чтобы они не наследовали форматирование
+      const lastRow = sheet.getLastRow()
+      if (lastRow > HEADER_ROW) {
+        sheet.getRange(DATA_START_ROW, newNightCol, lastRow - HEADER_ROW, 1).setBackground(null)
+      }
+      
       const nightHeader = sheet.getRange(HEADER_ROW, newNightCol)
       nightHeader.setHorizontalAlignment('center')
         .setVerticalAlignment('middle')
@@ -208,6 +214,13 @@ function history_ensurePeriodColumn(period) {
   const newCol = Math.max(lastCol + 1, firstDateCol)
   sheet.getRange(HEADER_ROW, newCol).setValue(headerDisplay)
   history_formatPriceColumn_(sheet, newCol)
+  
+  // ВАЖНО: Сбрасываем фон для всех ячеек новой колонки, чтобы они не наследовали форматирование от предыдущей колонки
+  // Это предотвращает наследование окраски min/max от предыдущих колонок
+  const lastRow = sheet.getLastRow()
+  if (lastRow > HEADER_ROW) {
+    sheet.getRange(DATA_START_ROW, newCol, lastRow - HEADER_ROW, 1).setBackground(null)
+  }
   
   // Форматируем заголовок
   const header = sheet.getRange(HEADER_ROW, newCol)
@@ -673,6 +686,36 @@ function history_updateCurrentPriceMinMax_(sheet = null) {
   sheet.getRange(DATA_START_ROW, currentPriceCol, count, 1).setValues(currentPrices)
   sheet.getRange(DATA_START_ROW, minPriceCol, count, 1).setValues(minPrices)
   sheet.getRange(DATA_START_ROW, maxPriceCol, count, 1).setValues(maxPrices)
+  
+  // Окрашиваем устаревшие цены в желтый (STABLE)
+  // Если цена не за текущий период - она устарела и должна быть желтой
+  const backgroundsToSet = []
+  for (let i = 0; i < count; i++) {
+    const currentPrice = currentPrices[i][0]
+    if (currentPrice != null && currentPrice !== '') {
+      // Проверяем, есть ли цена за текущий период
+      const hasCurrentPeriodPrice = currentPeriodColIndex >= 0 && 
+                                    priceDataWidth > 0 && 
+                                    priceData[i] && 
+                                    priceData[i][currentPeriodColIndex] &&
+                                    typeof priceData[i][currentPeriodColIndex] === 'number' &&
+                                    !isNaN(priceData[i][currentPeriodColIndex]) &&
+                                    priceData[i][currentPeriodColIndex] > 0
+      
+      // Если нет цены за текущий период - цена устарела, окрашиваем в желтый
+      if (!hasCurrentPeriodPrice) {
+        backgroundsToSet.push({ row: i + DATA_START_ROW, col: currentPriceCol, color: COLORS.STABLE })
+      } else {
+        // Если есть цена за текущий период - сбрасываем фон (белый)
+        backgroundsToSet.push({ row: i + DATA_START_ROW, col: currentPriceCol, color: null })
+      }
+    }
+  }
+  
+  // Batch-применение фонов
+  backgroundsToSet.forEach(bg => {
+    sheet.getRange(bg.row, bg.col).setBackground(bg.color)
+  })
   
   console.log(`History: обновлено Текущая цена/Min/Max для ${updatedCount} строк`)
 }
