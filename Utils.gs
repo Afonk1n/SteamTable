@@ -373,12 +373,7 @@ function unified_priceUpdate() {
     
     syncPricesFromHistoryToInvestAndSales()
     
-    // Проверяем целевые цены для Telegram уведомлений
-    try {
-      telegram_checkPriceTargets()
-    } catch (e) {
-      console.error('Unified: ошибка проверки Telegram целей:', e)
-    }
+    // Убрали вызов telegram_checkPriceTargets() - теперь используется ежедневный триггер в 13:00
     
     if (historyCompleted) {
       setPriceCollectionState(period, true)

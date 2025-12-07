@@ -34,6 +34,13 @@ function setupAllTriggers() {
     .everyMinutes(UPDATE_INTERVALS.PRICES_MINUTES)
     .create()
   
+  // Ежедневная проверка цен для Telegram уведомлений (13:00)
+  ScriptApp.newTrigger('telegram_checkDailyPriceTargets')
+    .timeBased()
+    .atHour(13) // 13:00 (час дня)
+    .everyDays(1)
+    .create()
+  
   SpreadsheetApp.getUi().alert('Все триггеры настроены')
 }
 
@@ -97,6 +104,7 @@ function onOpen() {
     .addSubMenu(ui.createMenu('Telegram')
       .addItem('Настроить Telegram', 'telegram_setup')
       .addItem('Тест Telegram', 'telegram_testConnection')
+      .addItem('Тест ежедневных уведомлений', 'telegram_testDailyNotifications')
     )
     .addToUi()
 }

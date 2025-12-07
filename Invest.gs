@@ -138,8 +138,7 @@ function invest_dailyReset() {
   // Обновляем аналитику портфеля
   try {
     portfolioStats_update()
-    // Отправляем ежедневный отчет в Telegram
-    telegram_sendDailyReport()
+    // Убрали вызов telegram_sendDailyReport() - теперь отправляется через триггер 13:00 вместе с уведомлениями о ценах
   } catch (e) {
     console.error('Invest: ошибка при обновлении аналитики портфеля:', e)
   }

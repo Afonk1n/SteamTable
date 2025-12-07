@@ -113,6 +113,26 @@ function telegram_testConnection() {
 }
 
 /**
+ * Тест ежедневных уведомлений (для ручного запуска из меню)
+ */
+function telegram_testDailyNotifications() {
+  const config = telegram_getConfig()
+  
+  if (!config) {
+    SpreadsheetApp.getUi().alert('Telegram не настроен!\n\nИспользуйте меню: SteamTable → Telegram → Настроить Telegram')
+    return
+  }
+  
+  try {
+    telegram_checkDailyPriceTargets()
+    SpreadsheetApp.getUi().alert('✅ Ежедневные уведомления отправлены (если есть позиции для уведомлений)')
+  } catch (e) {
+    console.error('Telegram: ошибка при тесте ежедневных уведомлений:', e)
+    SpreadsheetApp.getUi().alert('❌ Ошибка: ' + e.message)
+  }
+}
+
+/**
  * Настройка Telegram через диалог
  */
 function telegram_setup() {
@@ -255,6 +275,124 @@ function telegram_checkPriceTargets() {
   
   if (notificationsSent > 0) {
     console.log(`Telegram: отправлено ${notificationsSent} уведомлений`)
+  }
+}
+
+/**
+ * Ежедневная проверка цен и отправка уведомлений
+ * Отправляет три сообщения:
+ * 1. Общий отчет о портфеле
+ * 2. Позиции, достигшие цели (готовы к продаже)
+ * 3. Позиции с сильной просадкой (50%+, сигнал покупки)
+ */
+function telegram_checkDailyPriceTargets() {
+  const config = telegram_getConfig()
+  if (!config) {
+    return // Telegram не настроен, просто выходим
+  }
+  
+  // 1. Отправляем общий отчет о портфеле
+  try {
+    telegram_sendDailyReport()
+    Utilities.sleep(1000) // Пауза между сообщениями
+  } catch (e) {
+    console.error('Telegram: ошибка при отправке ежедневного отчета:', e)
+  }
+  
+  const investSheet = getInvestSheet_()
+  if (!investSheet) {
+    console.log('Telegram: лист Invest не найден')
+    return
+  }
+  
+  const lastRow = investSheet.getLastRow()
+  if (lastRow <= 1) {
+    return // Нет данных
+  }
+  
+  // Читаем данные batch-запросом
+  const count = lastRow - 1
+  const names = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.NAME), count, 1).getValues()
+  const currentPrices = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.CURRENT_PRICE), count, 1).getValues()
+  const goals = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.GOAL), count, 1).getValues()
+  const profits = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PROFIT), count, 1).getValues()
+  const profitPercents = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PROFIT_AFTER_FEE), count, 1).getValues()
+  
+  // Собираем позиции, достигшие цели
+  const reachedGoal = []
+  // Собираем позиции с сильной просадкой
+  const strongDrop = []
+  
+  for (let i = 0; i < count; i++) {
+    const name = String(names[i][0] || '').trim()
+    if (!name) continue
+    
+    const currentPrice = Number(currentPrices[i][0]) || 0
+    const goal = Number(goals[i][0]) || 0
+    const profit = Number(profits[i][0]) || 0
+    const profitPercent = Number(profitPercents[i][0]) || 0
+    
+    if (goal <= 0 || currentPrice <= 0) continue
+    
+    // Проверка достижения цели
+    if (currentPrice >= goal) {
+      reachedGoal.push({
+        name,
+        currentPrice,
+        goal,
+        profit,
+        profitPercent
+      })
+    }
+    
+    // Проверка сильной просадки (50%+)
+    if (currentPrice <= goal * 0.5) {
+      const dropPercent = ((goal - currentPrice) / goal) * 100
+      strongDrop.push({
+        name,
+        currentPrice,
+        goal,
+        dropPercent
+      })
+    }
+  }
+  
+  // Отправляем первое сообщение: достигшие цели
+  if (reachedGoal.length > 0) {
+    let message = `🎯 <b>Позиции, достигшие цели (готовы к продаже)</b>\n\n`
+    
+    reachedGoal.forEach((item, index) => {
+      message += `${index + 1}. <b>${item.name}</b>\n`
+      message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (цель: ${item.goal.toFixed(2)} ₽)\n`
+      message += `   Прибыль: ${item.profit.toFixed(2)} ₽ (${(item.profitPercent * 100).toFixed(2)}%)\n\n`
+    })
+    
+    message += `Всего: <b>${reachedGoal.length}</b> позиций`
+    
+    telegram_sendMessage(message)
+    Utilities.sleep(1000) // Пауза между сообщениями
+  }
+  
+  // Отправляем второе сообщение: просевшие позиции
+  if (strongDrop.length > 0) {
+    let message = `📉 <b>Позиции с сильной просадкой (сигнал покупки)</b>\n\n`
+    
+    strongDrop.forEach((item, index) => {
+      message += `${index + 1}. <b>${item.name}</b>\n`
+      message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (цель: ${item.goal.toFixed(2)} ₽)\n`
+      message += `   Просадка: ${item.dropPercent.toFixed(2)}%\n\n`
+    })
+    
+    message += `Всего: <b>${strongDrop.length}</b> позиций\n\n`
+    message += `Рекомендация: 🟩 КУПИТЬ`
+    
+    telegram_sendMessage(message)
+  }
+  
+  if (reachedGoal.length === 0 && strongDrop.length === 0) {
+    console.log('Telegram: нет позиций для уведомлений')
+  } else {
+    console.log(`Telegram: отправлено уведомлений - достигли цели: ${reachedGoal.length}, просадка: ${strongDrop.length}`)
   }
 }
 
