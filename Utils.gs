@@ -275,6 +275,9 @@ function history_createPeriodAndUpdate() {
   
   console.log(`Unified: начало обработки периода ${period}`)
   
+  // ВАЖНО: Создаем лист AutoLog заранее, чтобы он точно существовал для логирования
+  getOrCreateAutoLogSheet_()
+  
   const lockKey = 'unified_price_update_lock'
   const lockCheck = acquireLock_(lockKey, 600)
   if (lockCheck.locked) {
@@ -366,6 +369,10 @@ function unified_priceUpdate() {
   }
   
   const period = check.period
+  
+  // ВАЖНО: Создаем лист AutoLog заранее, чтобы он точно существовал для логирования
+  getOrCreateAutoLogSheet_()
+  
   const lockKey = 'unified_price_update_lock'
   const lockCheck = acquireLock_(lockKey, 600)
   if (lockCheck.locked) {
