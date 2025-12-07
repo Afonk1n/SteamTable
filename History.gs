@@ -601,16 +601,49 @@ function history_updateCurrentPriceMinMax_(sheet = null) {
     : []
   
   const period = getCurrentPricePeriod()
+  
+  // ОПТИМИЗАЦИЯ: Читаем заголовки колонок дат один раз вместо вызова getHistoryPriceForPeriod_ в цикле
+  const dateHeaders = priceDataWidth > 0
+    ? sheet.getRange(HEADER_ROW, firstDateCol, 1, priceDataWidth).getDisplayValues()[0]
+    : []
+  
+  const now = new Date()
+  const todayStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd.MM.yy')
+  const periodLabel = period === PRICE_COLLECTION_PERIODS.MORNING ? 'ночь' : 'день'
+  const targetHeader = `${todayStr} ${periodLabel}`
+  
+  // Находим индекс колонки с текущим периодом
+  let currentPeriodColIndex = -1
+  for (let j = dateHeaders.length - 1; j >= 0; j--) {
+    if (String(dateHeaders[j] || '').trim() === targetHeader) {
+      currentPeriodColIndex = j
+      break
+    }
+  }
+  
   let updatedCount = 0
   
   for (let i = 0; i < count; i++) {
     const name = String(names[i][0] || '').trim()
     if (!name) continue
     
-    // Получаем текущую цену для текущего периода
-    const priceResult = getHistoryPriceForPeriod_(sheet, name, period)
-    if (priceResult && priceResult.found) {
-      currentPrices[i][0] = priceResult.price
+    // ОПТИМИЗАЦИЯ: Получаем текущую цену напрямую из уже прочитанных данных
+    if (currentPeriodColIndex >= 0 && priceDataWidth > 0 && priceData[i] && priceData[i][currentPeriodColIndex]) {
+      const price = priceData[i][currentPeriodColIndex]
+      if (typeof price === 'number' && !isNaN(price) && price > 0) {
+        currentPrices[i][0] = price
+      } else {
+        // Если цена за текущий период отсутствует, ищем последнюю заполненную цену
+        let foundPrice = null
+        for (let j = priceData[i].length - 1; j >= 0; j--) {
+          const value = priceData[i][j]
+          if (typeof value === 'number' && !isNaN(value) && value > 0) {
+            foundPrice = value
+            break
+          }
+        }
+        currentPrices[i][0] = foundPrice
+      }
     } else {
       currentPrices[i][0] = null
     }

@@ -460,6 +460,51 @@ function syncInvestPricesFromHistory_(historySheet) {
   const currentPrices = investSheet.getRange(DATA_START_ROW, priceColIndex, count, 1).getValues()
   // const statuses = investSheet.getRange(DATA_START_ROW, statusColIndex, count, 1).getValues()
   
+  // ОПТИМИЗАЦИЯ: Читаем все данные History одним batch-запросом
+  const historyLastRow = historySheet.getLastRow()
+  const historyLastCol = historySheet.getLastColumn()
+  const historyFirstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
+  
+  if (historyLastRow <= 1 || historyLastCol < historyFirstDateCol) {
+    console.log('Sync Invest: History не содержит данных')
+    return
+  }
+  
+  const historyNames = historySheet.getRange(DATA_START_ROW, 2, historyLastRow - 1, 1).getValues()
+  const historyDateCount = historyLastCol - historyFirstDateCol + 1
+  const historyDateHeaders = historySheet.getRange(HEADER_ROW, historyFirstDateCol, 1, historyDateCount).getDisplayValues()[0]
+  const historyPriceData = historySheet.getRange(DATA_START_ROW, historyFirstDateCol, historyLastRow - 1, historyDateCount).getValues()
+  
+  // Находим индекс колонки с текущим периодом
+  const period = getCurrentPricePeriod()
+  const now = new Date()
+  const todayStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd.MM.yy')
+  const periodLabel = period === PRICE_COLLECTION_PERIODS.MORNING ? 'ночь' : 'день'
+  const targetHeader = `${todayStr} ${periodLabel}`
+  
+  let currentPeriodColIndex = -1
+  for (let j = historyDateHeaders.length - 1; j >= 0; j--) {
+    if (String(historyDateHeaders[j] || '').trim() === targetHeader) {
+      currentPeriodColIndex = j
+      break
+    }
+  }
+  
+  // Создаем Map для быстрого поиска цен по имени
+  const historyPriceMap = new Map()
+  for (let h = 0; h < historyLastRow - 1; h++) {
+    const historyName = String(historyNames[h][0] || '').trim()
+    if (historyName && historyPriceData[h]) {
+      historyPriceMap.set(historyName, {
+        row: h,
+        prices: historyPriceData[h],
+        currentPeriodColIndex: currentPeriodColIndex
+      })
+    }
+  }
+  
+  const backgroundsToSet = [] // Массив для batch-применения фонов
+  
   let updatedCount = 0
   let errorCount = 0
   
@@ -467,27 +512,46 @@ function syncInvestPricesFromHistory_(historySheet) {
     const name = String(names[i][0] || '').trim()
     if (!name) continue
     
-    const priceResult = getHistoryPriceForPeriod_(historySheet, name, getCurrentPricePeriod())
-    
-    if (!priceResult.found) {
-      if (priceResult.reason === 'item_not_found') {
-        currentPrices[i][0] = null
-        errorCount++
-      }
+    const historyData = historyPriceMap.get(name)
+    if (!historyData) {
+      currentPrices[i][0] = null
+      errorCount++
       continue
     }
     
-    currentPrices[i][0] = priceResult.price
-    // статусов больше нет
+    // Получаем цену из уже прочитанных данных
+    let price = null
+    if (historyData.currentPeriodColIndex >= 0 && historyData.prices[historyData.currentPeriodColIndex]) {
+      const value = historyData.prices[historyData.currentPeriodColIndex]
+      if (typeof value === 'number' && !isNaN(value) && value > 0) {
+        price = value
+      }
+    }
+    
+    // Если цена за текущий период отсутствует, ищем последнюю заполненную цену
+    if (price === null) {
+      for (let j = historyData.prices.length - 1; j >= 0; j--) {
+        const value = historyData.prices[j]
+        if (typeof value === 'number' && !isNaN(value) && value > 0) {
+          price = value
+          break
+        }
+      }
+    }
+    
+    currentPrices[i][0] = price
     updatedCount++
     
     const row = i + DATA_START_ROW
-    if (priceResult.isOutdated) {
-      investSheet.getRange(row, priceColIndex).setBackground(COLORS.STABLE)
-    } else {
-      investSheet.getRange(row, priceColIndex).setBackground(null)
-    }
+    // Определяем, устарела ли цена (не за текущий период)
+    const isOutdated = historyData.currentPeriodColIndex < 0 || !historyData.prices[historyData.currentPeriodColIndex]
+    backgroundsToSet.push({ row, col: priceColIndex, color: isOutdated ? COLORS.STABLE : null })
   }
+  
+  // Batch-применение фонов
+  backgroundsToSet.forEach(bg => {
+    investSheet.getRange(bg.row, bg.col).setBackground(bg.color)
+  })
   
   investSheet.getRange(DATA_START_ROW, priceColIndex, count, 1).setValues(currentPrices)
   // статусов больше нет
@@ -519,6 +583,51 @@ function syncSalesPricesFromHistory_(historySheet) {
   // const statuses = salesSheet.getRange(DATA_START_ROW, statusColIndex, count, 1).getValues()
   const sellPrices = salesSheet.getRange(DATA_START_ROW, sellColIndex, count, 1).getValues()
   
+  // ОПТИМИЗАЦИЯ: Читаем все данные History одним batch-запросом (используем те же данные, что и для Invest)
+  const historyLastRow = historySheet.getLastRow()
+  const historyLastCol = historySheet.getLastColumn()
+  const historyFirstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
+  
+  if (historyLastRow <= 1 || historyLastCol < historyFirstDateCol) {
+    console.log('Sync Sales: History не содержит данных')
+    return
+  }
+  
+  const historyNames = historySheet.getRange(DATA_START_ROW, 2, historyLastRow - 1, 1).getValues()
+  const historyDateCount = historyLastCol - historyFirstDateCol + 1
+  const historyDateHeaders = historySheet.getRange(HEADER_ROW, historyFirstDateCol, 1, historyDateCount).getDisplayValues()[0]
+  const historyPriceData = historySheet.getRange(DATA_START_ROW, historyFirstDateCol, historyLastRow - 1, historyDateCount).getValues()
+  
+  // Находим индекс колонки с текущим периодом
+  const period = getCurrentPricePeriod()
+  const now = new Date()
+  const todayStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd.MM.yy')
+  const periodLabel = period === PRICE_COLLECTION_PERIODS.MORNING ? 'ночь' : 'день'
+  const targetHeader = `${todayStr} ${periodLabel}`
+  
+  let currentPeriodColIndex = -1
+  for (let j = historyDateHeaders.length - 1; j >= 0; j--) {
+    if (String(historyDateHeaders[j] || '').trim() === targetHeader) {
+      currentPeriodColIndex = j
+      break
+    }
+  }
+  
+  // Создаем Map для быстрого поиска цен по имени
+  const historyPriceMap = new Map()
+  for (let h = 0; h < historyLastRow - 1; h++) {
+    const historyName = String(historyNames[h][0] || '').trim()
+    if (historyName && historyPriceData[h]) {
+      historyPriceMap.set(historyName, {
+        row: h,
+        prices: historyPriceData[h],
+        currentPeriodColIndex: currentPeriodColIndex
+      })
+    }
+  }
+  
+  const backgroundsToSet = [] // Массив для batch-применения фонов
+  
   let updatedCount = 0
   let errorCount = 0
   
@@ -526,22 +635,38 @@ function syncSalesPricesFromHistory_(historySheet) {
     const name = String(names[i][0] || '').trim()
     if (!name) continue
     
-    const priceResult = getHistoryPriceForPeriod_(historySheet, name, getCurrentPricePeriod())
-    
-    if (!priceResult.found) {
-      if (priceResult.reason === 'item_not_found') {
-        currentPrices[i][0] = null
-        errorCount++
-      }
+    const historyData = historyPriceMap.get(name)
+    if (!historyData) {
+      currentPrices[i][0] = null
+      errorCount++
       continue
     }
     
-    currentPrices[i][0] = priceResult.price
-    // статусов больше нет
+    // Получаем цену из уже прочитанных данных
+    let price = null
+    if (historyData.currentPeriodColIndex >= 0 && historyData.prices[historyData.currentPeriodColIndex]) {
+      const value = historyData.prices[historyData.currentPeriodColIndex]
+      if (typeof value === 'number' && !isNaN(value) && value > 0) {
+        price = value
+      }
+    }
+    
+    // Если цена за текущий период отсутствует, ищем последнюю заполненную цену
+    if (price === null) {
+      for (let j = historyData.prices.length - 1; j >= 0; j--) {
+        const value = historyData.prices[j]
+        if (typeof value === 'number' && !isNaN(value) && value > 0) {
+          price = value
+          break
+        }
+      }
+    }
+    
+    currentPrices[i][0] = price
     
     const sellPrice = Number(sellPrices[i][0])
-    if (Number.isFinite(sellPrice) && sellPrice > 0 && priceResult.price > 0) {
-      priceDrops[i][0] = (sellPrice - priceResult.price) / sellPrice
+    if (Number.isFinite(sellPrice) && sellPrice > 0 && price !== null && price > 0) {
+      priceDrops[i][0] = (sellPrice - price) / sellPrice
     } else {
       priceDrops[i][0] = null
     }
@@ -549,12 +674,15 @@ function syncSalesPricesFromHistory_(historySheet) {
     updatedCount++
     
     const row = i + DATA_START_ROW
-    if (priceResult.isOutdated) {
-      salesSheet.getRange(row, priceColIndex).setBackground(COLORS.STABLE)
-    } else {
-      salesSheet.getRange(row, priceColIndex).setBackground(null)
-    }
+    // Определяем, устарела ли цена (не за текущий период)
+    const isOutdated = historyData.currentPeriodColIndex < 0 || !historyData.prices[historyData.currentPeriodColIndex]
+    backgroundsToSet.push({ row, col: priceColIndex, color: isOutdated ? COLORS.STABLE : null })
   }
+  
+  // Batch-применение фонов
+  backgroundsToSet.forEach(bg => {
+    salesSheet.getRange(bg.row, bg.col).setBackground(bg.color)
+  })
   
   salesSheet.getRange(DATA_START_ROW, priceColIndex, count, 1).setValues(currentPrices)
   salesSheet.getRange(DATA_START_ROW, dropColIndex, count, 1).setValues(priceDrops)
@@ -944,29 +1072,73 @@ function syncMinMaxFromHistoryUniversal_(targetSheet, minColIndex, maxColIndex, 
   const outMax = maxCol.map(r => [r[0]])
   let updatedCount = 0
 
-  for (let i = 0; i < count; i++) {
-    const name = String(names[i][0] || '').trim()
-    if (!name) continue
-
-    if (!updateAll) {
-      const hasMin = outMin[i][0] != null && outMin[i][0] !== ''
-      const hasMax = outMax[i][0] != null && outMax[i][0] !== ''
-      if (hasMin && hasMax) continue
+  // ОПТИМИЗАЦИЯ: Читаем все данные History одним batch-запросом
+  const historyLastRow = history.getLastRow()
+  const historyLastCol = history.getLastColumn()
+  
+  if (historyLastRow <= 1 || historyLastCol < HISTORY_COLUMNS.FIRST_DATE_COL) {
+    // Если History пустой, заполняем значениями по умолчанию
+    for (let i = 0; i < count; i++) {
+      const name = String(names[i][0] || '').trim()
+      if (!name) continue
+      
+      if (updateAll || !outMin[i][0] || !outMax[i][0]) {
+        outMin[i][0] = STATUS.NO_VALUES
+        outMax[i][0] = STATUS.NO_VALUES
+        updatedCount++
+      }
     }
+  } else {
+    // Читаем все данные History одним batch-запросом
+    const historyNames = history.getRange(DATA_START_ROW, 2, historyLastRow - 1, 1).getValues()
+    const historyFirstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
+    const historyDateCount = historyLastCol - historyFirstDateCol + 1
+    const historyPriceData = history.getRange(DATA_START_ROW, historyFirstDateCol, historyLastRow - 1, historyDateCount).getValues()
+    
+    // Создаем Map для быстрого поиска Min/Max по имени
+    const historyMinMaxMap = new Map()
+    for (let h = 0; h < historyLastRow - 1; h++) {
+      const historyName = String(historyNames[h][0] || '').trim()
+      if (historyName && historyPriceData[h]) {
+        // Вычисляем Min/Max из всех цен для этой строки
+        const prices = historyPriceData[h].filter(v => typeof v === 'number' && !isNaN(v) && v > 0)
+        if (prices.length > 0) {
+          historyMinMaxMap.set(historyName, {
+            min: Math.min(...prices),
+            max: Math.max(...prices)
+          })
+        } else {
+          historyMinMaxMap.set(historyName, { noValues: true })
+        }
+      }
+    }
+    
+    // Синхронизируем данные
+    for (let i = 0; i < count; i++) {
+      const name = String(names[i][0] || '').trim()
+      if (!name) continue
 
-    const mm = getHistoryMinMaxByName_(history, name)
-    if (mm && mm.min != null && mm.max != null) {
-      outMin[i][0] = mm.min
-      outMax[i][0] = mm.max
-      updatedCount++
-    } else if (mm && mm.noItem) {
-      outMin[i][0] = STATUS.MISSING
-      outMax[i][0] = STATUS.MISSING
-      updatedCount++
-    } else if (mm && mm.noValues) {
-      outMin[i][0] = STATUS.NO_VALUES
-      outMax[i][0] = STATUS.NO_VALUES
-      updatedCount++
+      if (!updateAll) {
+        const hasMin = outMin[i][0] != null && outMin[i][0] !== ''
+        const hasMax = outMax[i][0] != null && outMax[i][0] !== ''
+        if (hasMin && hasMax) continue
+      }
+
+      const mm = historyMinMaxMap.get(name)
+      if (mm && mm.min != null && mm.max != null) {
+        outMin[i][0] = mm.min
+        outMax[i][0] = mm.max
+        updatedCount++
+      } else if (!mm) {
+        // Предмет не найден в History
+        outMin[i][0] = STATUS.MISSING
+        outMax[i][0] = STATUS.MISSING
+        updatedCount++
+      } else if (mm.noValues) {
+        outMin[i][0] = STATUS.NO_VALUES
+        outMax[i][0] = STATUS.NO_VALUES
+        updatedCount++
+      }
     }
   }
 
