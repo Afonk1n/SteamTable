@@ -5,7 +5,7 @@
  */
 
 // Обработчик изменения листа для автоматической обработки чекбоксов
-// Отслеживает чекбоксы "Купить?" (History, колонка E) и "Продать?" (Invest, колонка V)
+// Отслеживает чекбоксы "Купить" (History, колонка E) и "Продать" (Invest, колонка V)
 function onEdit(e) {
   if (!e?.range) return
   
@@ -22,7 +22,7 @@ function onEdit(e) {
   const buyCheckboxCol = getColumnIndex(HISTORY_COLUMNS.BUY_CHECKBOX)
   const sellCheckboxCol = getColumnIndex(INVEST_COLUMNS.SELL_CHECKBOX)
   
-  // Обработка чекбокса "Купить?" в History
+  // Обработка чекбокса "Купить" в History
   if (sheetName === SHEET_NAMES.HISTORY && col === buyCheckboxCol) {
     const isChecked = e.range.getValue() === true
     if (isChecked) {
@@ -39,7 +39,7 @@ function onEdit(e) {
     return
   }
   
-  // Обработка чекбокса "Продать?" в Invest
+  // Обработка чекбокса "Продать" в Invest
   if (sheetName === SHEET_NAMES.INVEST && col === sellCheckboxCol) {
     const isChecked = e.range.getValue() === true
     if (isChecked) {
@@ -59,7 +59,7 @@ function onEdit(e) {
 
 /**
  * Обработка покупки из History через чекбокс
- * Вызывается автоматически при установке чекбокса "Купить?" в true
+ * Вызывается автоматически при установке чекбокса "Купить" в true
  * @param {Sheet} historySheet - Лист History
  * @param {number} row - Номер строки
  */
@@ -147,7 +147,7 @@ function handleBuyFromHistory_(historySheet, row) {
 
 /**
  * Обработка продажи из Invest через чекбокс
- * Вызывается автоматически при установке чекбокса "Продать?" в true
+ * Вызывается автоматически при установке чекбокса "Продать" в true
  * @param {Sheet} investSheet - Лист Invest
  * @param {number} row - Номер строки
  */

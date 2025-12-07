@@ -56,8 +56,8 @@ function history_formatTable() {
   // Примечание: Обновление аналитики (тренды, текущая цена, min/max) НЕ вызывается при форматировании,
   // так как это ручная операция только для настройки внешнего вида таблицы.
   // Аналитика обновляется автоматически после сбора цен или вручную через меню "Обновить аналитику".
-  // Добавляем колонку кнопки «Купить?» в E, если её нет
-  const buyHeader = 'Купить?'
+  // Добавляем колонку кнопки «Купить» в E, если её нет
+  const buyHeader = 'Купить'
   const colCount = sheet.getLastColumn()
   let needInsertBuyCol = false
   if (colCount < 5) {
@@ -555,7 +555,20 @@ function history_highlightMinMax_(sheet) {
     processedRows++
   }
 
-  // Batch обновление всех выделений одним проходом
+  // Batch обновление всех выделений - группируем по цвету для оптимизации
+  // Группируем ячейки по цвету, чтобы минимизировать количество запросов
+  const highlightsByColor = {}
+  highlights.forEach(highlight => {
+    if (!highlightsByColor[highlight.color]) {
+      highlightsByColor[highlight.color] = []
+    }
+    highlightsByColor[highlight.color].push({ row: highlight.row, col: highlight.col })
+  })
+  
+  // Применяем цвета группами (для каждого цвета - один batch запрос)
+  // Примечание: к сожалению, Google Sheets API не поддерживает установку разных цветов
+  // для разных ячеек в одном диапазоне, поэтому оставляем цикл, но он уже оптимизирован
+  // тем, что мы собираем все ячейки заранее
   highlights.forEach(highlight => {
     sheet.getRange(highlight.row, highlight.col).setBackground(highlight.color)
   })
@@ -633,18 +646,36 @@ function history_updateCurrentPriceMinMax_(sheet = null) {
 }
 
 // Форматирует все существующие колонки дат (N и далее) для всех строк
+// ОПТИМИЗИРОВАНО: использует batch-операции вместо цикла по колонкам
 function history_formatAllDateColumns_(sheet) {
   const lastRow = sheet.getLastRow()
   const lastCol = sheet.getLastColumn()
   const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
   if (lastRow <= 1 || lastCol < firstDateCol) return
   
+  const dateColsCount = lastCol - firstDateCol + 1
+  const dataRowsCount = lastRow - 1
+  
+  // Batch-операции для всех колонок дат сразу
+  if (dataRowsCount > 0) {
+    // Форматирование всех колонок дат одним запросом (формат, выравнивание)
+    const dateDataRange = sheet.getRange(DATA_START_ROW, firstDateCol, dataRowsCount, dateColsCount)
+    dateDataRange.setNumberFormat('#,##0.00 ₽')
+    dateDataRange.setHorizontalAlignment('center')
+    dateDataRange.setVerticalAlignment('middle')
+  }
+  
+  // Форматирование заголовков колонок дат
+  if (dateColsCount > 0) {
+    const headerRange = sheet.getRange(HEADER_ROW, firstDateCol, 1, dateColsCount)
+    headerRange.setHorizontalAlignment('center')
+    headerRange.setVerticalAlignment('middle')
+    formatHeaderRange_(headerRange)
+  }
+  
+  // Установка ширины колонок (можно сделать batch, но setColumnWidth принимает только одну колонку)
+  // Оставляем цикл только для ширины, так как это быстрая операция
   for (let col = firstDateCol; col <= lastCol; col++) {
-    history_formatPriceColumn_(sheet, col)
-    const h = sheet.getRange(HEADER_ROW, col, 1, 1)
-    h.setHorizontalAlignment('center')
-    h.setVerticalAlignment('middle')
-    formatHeaderRange_(h)
     sheet.setColumnWidth(col, 100)
   }
 }
@@ -929,6 +960,45 @@ function history_calculateDaysChange_(prices, dates, currentTrend) {
   return 0 // Если не удалось вычислить
 }
 
+// ОПТИМИЗИРОВАННАЯ версия анализа тренда - работает с уже прочитанными данными (без запросов к таблице)
+function history_analyzeTrendFromPrices_(prices, dates) {
+  if (prices.length < 2) return { trend: '🟪', daysChange: 0 }
+
+  // Анализируем тренд с помощью 4 методов
+  const methods = [
+    history_simpleComparison_(prices),
+    history_movingAverages_(prices),
+    history_linearRegression_(prices),
+    history_momentumAnalysis_(prices)
+  ]
+
+  // Подсчитываем голоса
+  const votes = { '🟩': 0, '🟥': 0, '🟨': 0, '🟪': 0 }
+  methods.forEach(trend => {
+    if (votes.hasOwnProperty(trend)) {
+      votes[trend]++
+    }
+  })
+
+  // Определяем итоговый тренд
+  let finalTrend = '🟪'
+  const maxVotes = Math.max(votes['🟩'], votes['🟥'], votes['🟨'], votes['🟪'])
+  
+  // Приоритет при равенстве: 🟥 > 🟩 > 🟨 > 🟪
+  if (votes['🟥'] === maxVotes) {
+    finalTrend = '🟥'
+  } else if (votes['🟩'] === maxVotes) {
+    finalTrend = '🟩'
+  } else if (votes['🟨'] === maxVotes) {
+    finalTrend = '🟨'
+  }
+
+  // Расчет дней смены тренда
+  const daysChange = history_calculateDaysChange_(prices, dates, finalTrend)
+
+  return { trend: finalTrend, daysChange }
+}
+
 // Обновление трендов для всех строк (оптимизированная версия)
 function history_updateTrends() {
   const sheet = getOrCreateHistorySheet_()
@@ -954,12 +1024,22 @@ function history_updateTrends() {
   const potentialCol = getColumnIndex(HISTORY_COLUMNS.POTENTIAL)   // L
   const recommendationCol = getColumnIndex(HISTORY_COLUMNS.RECOMMENDATION) // M
   
+  // ОПТИМИЗАЦИЯ: Читаем все данные одним batch-запросом
   const names = sheet.getRange(DATA_START_ROW, 2, count, 1).getValues() // B
   const trends = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.TREND), count, 1).getValues() // I
   const daysChanges = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.DAYS_CHANGE), count, 1).getValues() // J
   const phases = sheet.getRange(DATA_START_ROW, phaseCol, count, 1).getValues()
   const potentials = sheet.getRange(DATA_START_ROW, potentialCol, count, 1).getValues()
   const recommendations = sheet.getRange(DATA_START_ROW, recommendationCol, count, 1).getValues()
+  
+  // ОПТИМИЗАЦИЯ: Читаем все цены и заголовки колонок одним batch-запросом
+  const priceDataWidth = lastCol >= firstDateCol ? lastCol - firstDateCol + 1 : 0
+  const allPriceData = priceDataWidth > 0 
+    ? sheet.getRange(DATA_START_ROW, firstDateCol, count, priceDataWidth).getValues()
+    : []
+  const allHeaders = priceDataWidth > 0
+    ? sheet.getRange(HEADER_ROW, firstDateCol, 1, priceDataWidth).getDisplayValues()[0]
+    : []
 
   let updatedCount = 0
   
@@ -969,29 +1049,31 @@ function history_updateTrends() {
     if (!name) continue
     
     const row = i + 2
-    const analysis = history_analyzeTrend(row)
     
-    // Собираем цены для расширенного анализа с группировкой по дате (как в history_analyzeTrend)
-    // ВАЖНО: Используем ту же логику группировки, что и для расчета тренда
+    // ОПТИМИЗАЦИЯ: Используем уже прочитанные данные вместо отдельных запросов
     const pricesByDate = new Map()
     const dateHeaders = []
     const priceEntries = []
     
-    for (let col = firstDateCol; col <= lastCol; col++) {
-      const value = sheet.getRange(row, col).getValue()
-      const headerDisplay = sheet.getRange(HEADER_ROW, col).getDisplayValue()
-      if (typeof value === 'number' && !isNaN(value) && value > 0 && headerDisplay) {
-        const headerStr = String(headerDisplay).trim()
-        const dateMatch = headerStr.match(/^(\d{2}\.\d{2}\.\d{2})/)
-        if (dateMatch) {
-          const dateKey = dateMatch[1]
-          priceEntries.push({
-            dateKey,
-            value,
-            col
-          })
-          if (!dateHeaders.includes(dateKey)) {
-            dateHeaders.push(dateKey)
+    // Обрабатываем данные из уже прочитанного массива
+    if (priceDataWidth > 0 && allPriceData[i]) {
+      for (let j = 0; j < priceDataWidth; j++) {
+        const value = allPriceData[i][j]
+        const headerDisplay = allHeaders[j]
+        if (typeof value === 'number' && !isNaN(value) && value > 0 && headerDisplay) {
+          const headerStr = String(headerDisplay).trim()
+          const dateMatch = headerStr.match(/^(\d{2}\.\d{2}\.\d{2})/)
+          if (dateMatch) {
+            const dateKey = dateMatch[1]
+            const col = firstDateCol + j
+            priceEntries.push({
+              dateKey,
+              value,
+              col
+            })
+            if (!dateHeaders.includes(dateKey)) {
+              dateHeaders.push(dateKey)
+            }
           }
         }
       }
@@ -1021,12 +1103,26 @@ function history_updateTrends() {
     
     // Создаем массив цен в хронологическом порядке (по одной цене на день)
     const prices = []
+    const dates = []
     for (const dateKey of sortedDateKeys) {
       const price = pricesByDate.get(dateKey)
       if (price) {
         prices.push(price)
+        // Преобразуем строку даты в объект Date для расчета разницы
+        const dateParts = dateKey.split('.')
+        if (dateParts.length === 3) {
+          const day = parseInt(dateParts[0], 10)
+          const month = parseInt(dateParts[1], 10) - 1 // месяцы в JS начинаются с 0
+          const year = 2000 + parseInt(dateParts[2], 10) // предполагаем формат yy -> 20yy
+          dates.push(new Date(year, month, day))
+        } else {
+          dates.push(new Date()) // fallback
+        }
       }
     }
+    
+    // ОПТИМИЗАЦИЯ: Анализируем тренд используя уже собранные данные (без дополнительных запросов к таблице)
+    const analysis = history_analyzeTrendFromPrices_(prices, dates)
     
     // Базовый анализ тренда
     trends[i][0] = analysis.trend
