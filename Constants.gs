@@ -8,7 +8,8 @@ const SHEET_NAMES = {
   SALES: 'Sales',
   HISTORY: 'History',
   AUTO_LOG: 'AutoLog',
-  LOG: 'Log'
+  LOG: 'Log',
+  PORTFOLIO_STATS: 'PortfolioStats'
 }
 
 // Базовые параметры

@@ -14,7 +14,7 @@ function invest_formatNewRow_(sheet, row) {
   const name = sheet.getRange(`B${row}`).getValue()
   if (!name) return
   
-  // Базовое форматирование строки (A-S = 19 колонок после удаления H и K)
+  // Базовое форматирование строки (A-R = 18 колонок после удаления H, K и DAYS_CHANGE)
   const numCols = getColumnIndex(INVEST_COLUMNS.RECOMMENDATION)
   sheet.getRange(row, 1, 1, numCols).setVerticalAlignment('middle').setHorizontalAlignment('center')
   sheet.getRange(`B${row}`).setHorizontalAlignment('left')
@@ -31,7 +31,9 @@ function invest_formatNewRow_(sheet, row) {
   sheet.getRange(`J${row}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль % с комиссией (было L)
   sheet.getRange(`L${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min цена (было N)
   sheet.getRange(`M${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Max цена (было O)
-  sheet.getRange(`O${row}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Дней смены (было Q)
+  // O: Фаза (было R, убрали DAYS_CHANGE)
+  // P: Потенциал (было S)
+  // Q: Рекомендация (было T)
   
   // Устанавливаем высоту строки
   sheet.setRowHeight(row, ROW_HEIGHT)
@@ -132,6 +134,15 @@ function invest_dailyReset() {
   invest_syncMinMaxFromHistory()
   invest_syncTrendDaysFromHistory()
   invest_syncExtendedAnalyticsFromHistory()
+  
+  // Обновляем аналитику портфеля
+  try {
+    portfolioStats_update()
+    // Отправляем ежедневный отчет в Telegram
+    telegram_sendDailyReport()
+  } catch (e) {
+    console.error('Invest: ошибка при обновлении аналитики портфеля:', e)
+  }
 
   try {
     logAutoAction_('Invest', 'Ежедневный сброс', 'OK')
@@ -284,7 +295,7 @@ function invest_formatTable() {
   const lastRow = sheet.getLastRow()
 
   // Используем константы для заголовков
-  const headers = HEADERS.INVEST // 19 колонок (убрали H и K)
+  const headers = HEADERS.INVEST // 18 колонок (убрали H, K и DAYS_CHANGE)
 
   sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
   
@@ -303,8 +314,7 @@ function invest_formatTable() {
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.IMAGE), COLUMN_WIDTHS.IMAGE)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.NAME), COLUMN_WIDTHS.NAME)
   sheet.setColumnWidths(3, 11, COLUMN_WIDTHS.WIDE) // C-M (11 колонок после удаления H и K)
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.NARROW)
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.DAYS_CHANGE), COLUMN_WIDTHS.MEDIUM)
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.MEDIUM) // Объединенный формат, шире
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.PHASE), COLUMN_WIDTHS.WIDE)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.POTENTIAL), COLUMN_WIDTHS.MEDIUM)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE)
@@ -314,7 +324,6 @@ function invest_formatTable() {
     sheet.getRange(`F2:F${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цель - явное форматирование для гарантии
     sheet.getRange(`J2:J${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль % с комиссией (было L)
     sheet.getRange(`L2:M${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min, Max (было O-P)
-    sheet.getRange(`O2:O${lastRow}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Дней смены (было Q)
     // Форматирование колонки Потенциал (Q) как процент с знаком "+"
     const potentialCol = getColumnIndex(INVEST_COLUMNS.POTENTIAL)
     sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1).setNumberFormat('+0%;-0%;"—"')
@@ -324,7 +333,7 @@ function invest_formatTable() {
 
     sheet.getRange(`A2:A${lastRow}`).setHorizontalAlignment('center')
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
-    sheet.getRange(`C2:S${lastRow}`).setHorizontalAlignment('center') // До S (было U)
+    sheet.getRange(`C2:R${lastRow}`).setHorizontalAlignment('center') // До R (было S, убрали DAYS_CHANGE)
   }
 
   if (lastRow > 1) {

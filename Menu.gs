@@ -73,6 +73,7 @@ function onOpen() {
       .addItem('Форматирование', 'invest_formatTable')
       .addItem('Изображение и ссылки', 'invest_updateImagesAndLinks')
       .addItem('Поиск дублей', 'invest_findDuplicates')
+      .addItem('Обновить аналитику портфеля', 'portfolioStats_formatTable')
     )
     .addSubMenu(ui.createMenu('Sales')
       .addItem('Форматирование', 'sales_formatTable')
@@ -88,6 +89,11 @@ function onOpen() {
     )
     .addSeparator()
     .addItem('Обновить аналитику Invest/Sales', 'syncAnalyticsForInvestSales_')
+    .addSeparator()
+    .addSubMenu(ui.createMenu('Telegram')
+      .addItem('Настроить Telegram', 'telegram_setup')
+      .addItem('Тест Telegram', 'telegram_testConnection')
+    )
     .addToUi()
 }
 

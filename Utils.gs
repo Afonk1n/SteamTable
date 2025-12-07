@@ -317,7 +317,9 @@ function history_createPeriodAndUpdate() {
         sales_syncMinMaxFromHistory()
         sales_syncTrendDaysFromHistory()
         sales_syncExtendedAnalyticsFromHistory()
-        console.log(`Unified: аналитика в Invest/Sales обновлена`)
+        // Обновляем аналитику портфеля
+        portfolioStats_update()
+        console.log(`Unified: аналитика в Invest/Sales и портфеля обновлена`)
       } catch (e) {
         console.error('Unified: ошибка при обновлении аналитики в Invest/Sales:', e)
         logAutoAction_('Unified', 'Ошибка обновления аналитики', 'ERROR')
@@ -371,6 +373,13 @@ function unified_priceUpdate() {
     
     syncPricesFromHistoryToInvestAndSales()
     
+    // Проверяем целевые цены для Telegram уведомлений
+    try {
+      telegram_checkPriceTargets()
+    } catch (e) {
+      console.error('Unified: ошибка проверки Telegram целей:', e)
+    }
+    
     if (historyCompleted) {
       setPriceCollectionState(period, true)
       console.log(`Unified: сбор цен для периода ${period} завершен`)
@@ -392,7 +401,9 @@ function unified_priceUpdate() {
         sales_syncMinMaxFromHistory()
         sales_syncTrendDaysFromHistory()
         sales_syncExtendedAnalyticsFromHistory()
-        console.log(`Unified: аналитика в Invest/Sales обновлена`)
+        // Обновляем аналитику портфеля
+        portfolioStats_update()
+        console.log(`Unified: аналитика в Invest/Sales и портфеля обновлена`)
       } catch (e) {
         console.error('Unified: ошибка при обновлении аналитики в Invest/Sales:', e)
         logAutoAction_('Unified', 'Ошибка обновления аналитики', 'ERROR')
@@ -436,7 +447,9 @@ function syncPricesFromHistoryToInvestAndSales() {
     sales_syncMinMaxFromHistory()
     sales_syncTrendDaysFromHistory()
     sales_syncExtendedAnalyticsFromHistory()
-    console.log(`Sync: аналитика в Invest/Sales обновлена`)
+    // Обновляем аналитику портфеля
+    portfolioStats_update()
+    console.log(`Sync: аналитика в Invest/Sales и портфеля обновлена`)
   } catch (e) {
     console.error('Sync: ошибка при обновлении аналитики в Invest/Sales:', e)
   }
