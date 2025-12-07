@@ -43,9 +43,10 @@ function telegram_getConfig() {
  * Отправляет сообщение в Telegram
  * @param {string} message - Текст сообщения
  * @param {string} parseMode - Режим парсинга ('HTML' или 'Markdown')
+ * @param {boolean} disablePreview - Отключить превью ссылок (по умолчанию true)
  * @returns {Object} {ok: boolean, error?: string}
  */
-function telegram_sendMessage(message, parseMode = 'HTML') {
+function telegram_sendMessage(message, parseMode = 'HTML', disablePreview = true) {
   const config = telegram_getConfig()
   
   if (!config) {
@@ -66,14 +67,17 @@ function telegram_sendMessage(message, parseMode = 'HTML') {
   const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`
   
   try {
+    const payload = {
+      chat_id: config.chatId,
+      text: message,
+      parse_mode: parseMode,
+      disable_web_page_preview: disablePreview
+    }
+    
     const response = UrlFetchApp.fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      payload: JSON.stringify({
-        chat_id: config.chatId,
-        text: message,
-        parse_mode: parseMode
-      }),
+      payload: JSON.stringify(payload),
       muteHttpExceptions: true
     })
     
@@ -296,7 +300,8 @@ function telegram_checkDailyPriceTargets() {
     telegram_sendDailyReport()
     Utilities.sleep(1000) // Пауза между сообщениями
   } catch (e) {
-    console.error('Telegram: ошибка при отправке ежедневного отчета:', e)
+    console.error('Telegram: критическая ошибка при отправке ежедневного отчета:', e)
+    // Продолжаем выполнение, даже если отчет не отправился
   }
   
   const investSheet = getInvestSheet_()
@@ -357,12 +362,20 @@ function telegram_checkDailyPriceTargets() {
     }
   }
   
+  // Сортируем позиции перед отправкой
+  // Достигшие цели - от самой прибыльной (по проценту) к менее прибыльной
+  reachedGoal.sort((a, b) => b.profitPercent - a.profitPercent)
+  
+  // Просевшие позиции - от самых просевших (по проценту просадки) к менее просевшим
+  strongDrop.sort((a, b) => b.dropPercent - a.dropPercent)
+  
   // Отправляем первое сообщение: достигшие цели
   if (reachedGoal.length > 0) {
-    let message = `🎯 <b>Позиции, достигшие цели (готовы к продаже)</b>\n\n`
+    let message = `🎯 <b>Позиции, достигшие цели</b>\n\n`
     
     reachedGoal.forEach((item, index) => {
-      message += `${index + 1}. <b>${item.name}</b>\n`
+      const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(item.name)}`
+      message += `${index + 1}. <b><a href="${itemUrl}">${item.name}</a></b>\n`
       message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (цель: ${item.goal.toFixed(2)} ₽)\n`
       message += `   Прибыль: ${item.profit.toFixed(2)} ₽ (${(item.profitPercent * 100).toFixed(2)}%)\n\n`
     })
@@ -375,10 +388,11 @@ function telegram_checkDailyPriceTargets() {
   
   // Отправляем второе сообщение: просевшие позиции
   if (strongDrop.length > 0) {
-    let message = `📉 <b>Позиции с сильной просадкой (сигнал покупки)</b>\n\n`
+    let message = `📉 <b>Позиции с сильной просадкой</b>\n\n`
     
     strongDrop.forEach((item, index) => {
-      message += `${index + 1}. <b>${item.name}</b>\n`
+      const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(item.name)}`
+      message += `${index + 1}. <b><a href="${itemUrl}">${item.name}</a></b>\n`
       message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (цель: ${item.goal.toFixed(2)} ₽)\n`
       message += `   Просадка: ${item.dropPercent.toFixed(2)}%\n\n`
     })
@@ -398,52 +412,70 @@ function telegram_checkDailyPriceTargets() {
 
 /**
  * Отправляет ежедневный отчет о портфеле
+ * Считает данные напрямую из Invest, не зависит от PortfolioStats
  */
 function telegram_sendDailyReport() {
   const config = telegram_getConfig()
   if (!config) {
+    console.log('Telegram: конфигурация не настроена, отчет не отправлен')
     return // Telegram не настроен
   }
   
-  const statsSheet = getOrCreatePortfolioStatsSheet_()
-  if (!statsSheet) {
-    console.log('Telegram: лист PortfolioStats не найден')
+  const investSheet = getInvestSheet_()
+  if (!investSheet) {
+    console.error('Telegram: лист Invest не найден')
     return
   }
   
   try {
-    // Читаем данные из PortfolioStats
-    const totalInvestment = statsSheet.getRange(4, 2).getValue() || 0
-    const totalCurrentValue = statsSheet.getRange(5, 2).getValue() || 0
-    const totalProfit = statsSheet.getRange(6, 2).getValue() || 0
-    const totalProfitPercent = statsSheet.getRange(6, 3).getValue() || 0
-    const totalPositions = statsSheet.getRange(8, 2).getValue() || 0
+    const lastRow = investSheet.getLastRow()
+    if (lastRow <= 1) {
+      console.log('Telegram: нет данных в Invest')
+      return
+    }
     
-    // Подсчитываем прибыльные/убыточные из данных
-    const investSheet = getInvestSheet_()
+    // Читаем данные из Invest batch-запросом
+    const count = lastRow - 1
+    const quantities = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.QUANTITY), count, 1).getValues()
+    const totalInvestments = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.TOTAL_INVESTMENT), count, 1).getValues()
+    const currentValues = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.CURRENT_VALUE_AFTER_FEE), count, 1).getValues()
+    const profits = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PROFIT), count, 1).getValues()
+    const profitPercents = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PROFIT_AFTER_FEE), count, 1).getValues()
+    
+    // Считаем метрики напрямую
+    let totalInvestment = 0
+    let totalCurrentValue = 0
+    let totalProfit = 0
+    let totalPositions = 0
     let profitableCount = 0
     let unprofitableCount = 0
     
-    if (investSheet) {
-      const lastRow = investSheet.getLastRow()
-      if (lastRow > 1) {
-        const profitPercents = investSheet.getRange(
-          DATA_START_ROW, 
-          getColumnIndex(INVEST_COLUMNS.PROFIT_AFTER_FEE), 
-          lastRow - 1, 
-          1
-        ).getValues()
-        
-        for (let i = 0; i < profitPercents.length; i++) {
-          const percent = Number(profitPercents[i][0]) || 0
-          if (percent > 0.01) {
-            profitableCount++
-          } else if (percent < -0.01) {
-            unprofitableCount++
-          }
-        }
+    for (let i = 0; i < count; i++) {
+      const quantity = Number(quantities[i][0]) || 0
+      if (quantity <= 0) continue // Пропускаем позиции с нулевым количеством
+      
+      const investment = Number(totalInvestments[i][0]) || 0
+      const currentValue = Number(currentValues[i][0]) || 0
+      const profit = Number(profits[i][0]) || 0
+      const profitPercent = Number(profitPercents[i][0]) || 0
+      
+      totalInvestment += investment
+      totalCurrentValue += currentValue
+      totalProfit += profit
+      totalPositions++
+      
+      // Классификация по прибыльности
+      if (profitPercent > 0.01) {
+        profitableCount++
+      } else if (profitPercent < -0.01) {
+        unprofitableCount++
       }
     }
+    
+    // Рассчитываем общий процент прибыли
+    const totalProfitPercent = totalInvestment > 0 
+      ? ((totalCurrentValue / totalInvestment) - 1) 
+      : 0
     
     const message = `📊 <b>Отчет по портфелю</b>\n\n` +
       `Общие вложения: <b>${totalInvestment.toFixed(2)}</b> ₽\n` +
@@ -456,12 +488,14 @@ function telegram_sendDailyReport() {
     const result = telegram_sendMessage(message)
     
     if (result.ok) {
-      console.log('Telegram: ежедневный отчет отправлен')
+      console.log('Telegram: ежедневный отчет отправлен успешно')
     } else {
       console.error('Telegram: ошибка отправки отчета:', result.error)
+      throw new Error(`Ошибка отправки отчета: ${result.error}`)
     }
   } catch (e) {
     console.error('Telegram: ошибка при формировании отчета:', e)
+    throw e
   }
 }
 

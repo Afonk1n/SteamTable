@@ -135,13 +135,7 @@ function invest_dailyReset() {
   invest_syncTrendDaysFromHistory()
   invest_syncExtendedAnalyticsFromHistory()
   
-  // Обновляем аналитику портфеля
-  try {
-    portfolioStats_update()
-    // Убрали вызов telegram_sendDailyReport() - теперь отправляется через триггер 13:00 вместе с уведомлениями о ценах
-  } catch (e) {
-    console.error('Invest: ошибка при обновлении аналитики портфеля:', e)
-  }
+  // Примечание: История портфеля теперь сохраняется автоматически в unified_priceUpdate() после дневного сбора
 
   try {
     logAutoAction_('Invest', 'Ежедневный сброс', 'OK')

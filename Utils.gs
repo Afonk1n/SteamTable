@@ -317,8 +317,10 @@ function history_createPeriodAndUpdate() {
         sales_syncMinMaxFromHistory()
         sales_syncTrendDaysFromHistory()
         sales_syncExtendedAnalyticsFromHistory()
-        // Обновляем аналитику портфеля
-        portfolioStats_update()
+        // Сохраняем историю портфеля (только после дневного сбора)
+        if (period === PRICE_COLLECTION_PERIODS.EVENING) {
+          portfolioStats_saveHistory_()
+        }
         console.log(`Unified: аналитика в Invest/Sales и портфеля обновлена`)
       } catch (e) {
         console.error('Unified: ошибка при обновлении аналитики в Invest/Sales:', e)
@@ -396,8 +398,10 @@ function unified_priceUpdate() {
         sales_syncMinMaxFromHistory()
         sales_syncTrendDaysFromHistory()
         sales_syncExtendedAnalyticsFromHistory()
-        // Обновляем аналитику портфеля
-        portfolioStats_update()
+        // Сохраняем историю портфеля (только после дневного сбора)
+        if (period === PRICE_COLLECTION_PERIODS.EVENING) {
+          portfolioStats_saveHistory_()
+        }
         console.log(`Unified: аналитика в Invest/Sales и портфеля обновлена`)
       } catch (e) {
         console.error('Unified: ошибка при обновлении аналитики в Invest/Sales:', e)

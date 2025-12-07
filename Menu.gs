@@ -95,7 +95,7 @@ function onOpen() {
       .addItem('Создать столбец текущего периода', 'history_ensureTodayColumn')
     )
     .addSubMenu(ui.createMenu('PortfolioStats')
-      .addItem('Обновить аналитику', 'portfolioStats_formatTable')
+      .addItem('Форматирование', 'portfolioStats_formatTable')
     )
     .addSeparator()
     .addItem('Синхронизировать цены из History', 'syncPricesFromHistoryToInvestAndSales')
