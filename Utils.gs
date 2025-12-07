@@ -893,6 +893,13 @@ function logAutoAction_(sheetName, action, status = 'OK') {
   const insertRow = HEADER_ROW + 1
   sheet.insertRowAfter(HEADER_ROW)
   const now = new Date()
+  
+  // ИСПРАВЛЕНИЕ: Сбрасываем форматирование заголовка для новой строки
+  // После insertRowAfter новая строка может наследовать форматирование заголовка
+  const newRowRange = sheet.getRange(insertRow, 1, 1, 4)
+  newRowRange.setBackground(null) // Сбрасываем фон
+  newRowRange.setFontWeight('normal') // Сбрасываем жирный шрифт
+  
   sheet.getRange(insertRow, 1, 1, 4).setValues([[now, sheetName, action, status]])
   sheet.getRange(insertRow, 1).setNumberFormat('dd.MM.yyyy HH:mm')
   sheet.getRange(insertRow, 1, 1, 4).setVerticalAlignment('middle').setHorizontalAlignment('center')
@@ -930,6 +937,13 @@ function logOperation_(type, itemName, quantity, pricePerUnit, total, source) {
   const insertRow = HEADER_ROW + 1
   sheet.insertRowAfter(HEADER_ROW)
   const now = new Date()
+  
+  // ИСПРАВЛЕНИЕ: Сбрасываем форматирование заголовка для новой строки
+  // После insertRowAfter новая строка может наследовать форматирование заголовка
+  const newRowRange = sheet.getRange(insertRow, 1, 1, 8)
+  newRowRange.setBackground(null) // Сбрасываем фон
+  newRowRange.setFontWeight('normal') // Сбрасываем жирный шрифт
+  
   // Порядок колонок: A Дата, B Тип, C Изображение, D Предмет, E Кол-во, F Цена за шт, G Сумма, H Источник
   sheet.getRange(insertRow, 1, 1, 2).setValues([[now, type]])
   
@@ -1148,16 +1162,16 @@ function syncMinMaxFromHistoryUniversal_(targetSheet, minColIndex, maxColIndex, 
   return { updatedCount }
 }
 
-// === УНИВЕРСАЛЬНАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ ТРЕНД/ДНЕЙ СМЕНЫ ИЗ HISTORY ===
+// === УНИВЕРСАЛЬНАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ ТРЕНД ИЗ HISTORY ===
 /**
- * Универсальная функция для синхронизации Тренд/Дней смены из History
+ * Универсальная функция для синхронизации Тренд из History
+ * Теперь Тренд содержит объединенный формат: "🟥 Падает 35 дн."
  * @param {Sheet} targetSheet - Лист назначения (Invest или Sales)
  * @param {number} trendColIndex - Индекс колонки Тренд
- * @param {number} daysColIndex - Индекс колонки Дней смены
  * @param {boolean} updateAll - Обновлять все или только пустые
  * @returns {Object} {updatedCount}
  */
-function syncTrendDaysFromHistoryUniversal_(targetSheet, trendColIndex, daysColIndex, updateAll) {
+function syncTrendFromHistoryUniversal_(targetSheet, trendColIndex, updateAll) {
   const lastRow = targetSheet.getLastRow()
   if (lastRow <= 1) return { updatedCount: 0 }
 
@@ -1167,10 +1181,8 @@ function syncTrendDaysFromHistoryUniversal_(targetSheet, trendColIndex, daysColI
   const count = lastRow - 1
   const names = targetSheet.getRange(DATA_START_ROW, 2, count, 1).getValues()
   const trendCol = targetSheet.getRange(DATA_START_ROW, trendColIndex, count, 1).getValues()
-  const daysCol = targetSheet.getRange(DATA_START_ROW, daysColIndex, count, 1).getValues()
 
   const outTrend = trendCol.map(r => [r[0]])
-  const outDays = daysCol.map(r => [r[0]])
   let updatedCount = 0
 
   // Получаем данные из History
@@ -1183,7 +1195,6 @@ function syncTrendDaysFromHistoryUniversal_(targetSheet, trendColIndex, daysColI
       
       if (updateAll || !outTrend[i][0]) {
         outTrend[i][0] = '🟪'
-        outDays[i][0] = 0
         updatedCount++
       }
     }
@@ -1191,9 +1202,7 @@ function syncTrendDaysFromHistoryUniversal_(targetSheet, trendColIndex, daysColI
     // Читаем все данные из History одним батчем
     const historyNames = history.getRange(DATA_START_ROW, 2, historyLastRow - 1, 1).getValues()
     const historyTrendCol = getColumnIndex(HISTORY_COLUMNS.TREND)
-    const historyDaysCol = getColumnIndex(HISTORY_COLUMNS.DAYS_CHANGE)
     const historyTrends = history.getRange(DATA_START_ROW, historyTrendCol, historyLastRow - 1, 1).getValues()
-    const historyDays = history.getRange(DATA_START_ROW, historyDaysCol, historyLastRow - 1, 1).getValues()
 
     // Создаем мапу для быстрого поиска
     const historyMap = new Map()
@@ -1201,8 +1210,7 @@ function syncTrendDaysFromHistoryUniversal_(targetSheet, trendColIndex, daysColI
       const hName = String(historyNames[i][0] || '').trim()
       if (hName) {
         historyMap.set(hName, {
-          trend: historyTrends[i][0] || '🟪',
-          days: historyDays[i][0] || 0
+          trend: historyTrends[i][0] || '🟪'
         })
       }
     }
@@ -1214,26 +1222,22 @@ function syncTrendDaysFromHistoryUniversal_(targetSheet, trendColIndex, daysColI
 
       if (!updateAll) {
         const hasTrend = outTrend[i][0] != null && outTrend[i][0] !== ''
-        const hasDays = outDays[i][0] != null && outDays[i][0] !== ''
-        if (hasTrend && hasDays) continue
+        if (hasTrend) continue
       }
 
       const historyData = historyMap.get(name)
       if (historyData) {
         outTrend[i][0] = historyData.trend
-        outDays[i][0] = historyData.days
         updatedCount++
       } else {
         // Предмет не найден в History - ставим значения по умолчанию
         outTrend[i][0] = '🟪'
-        outDays[i][0] = 0
         updatedCount++
       }
     }
   }
 
   targetSheet.getRange(DATA_START_ROW, trendColIndex, count, 1).setValues(outTrend)
-  targetSheet.getRange(DATA_START_ROW, daysColIndex, count, 1).setValues(outDays)
 
   return { updatedCount }
 }

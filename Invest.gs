@@ -14,25 +14,24 @@ function invest_formatNewRow_(sheet, row) {
   const name = sheet.getRange(`B${row}`).getValue()
   if (!name) return
   
-  // Базовое форматирование строки (A-U = 20 колонок без статуса)
+  // Базовое форматирование строки (A-S = 19 колонок после удаления H и K)
   const numCols = getColumnIndex(INVEST_COLUMNS.RECOMMENDATION)
   sheet.getRange(row, 1, 1, numCols).setVerticalAlignment('middle').setHorizontalAlignment('center')
   sheet.getRange(`B${row}`).setHorizontalAlignment('left')
   
   // Форматы чисел (используем константы)
+  // УДАЛЕНЫ: H (Текущая стоимость без комиссии), K (Прибыль % без комиссии)
   sheet.getRange(`C${row}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Количество
   sheet.getRange(`D${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цена покупки
   sheet.getRange(`E${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Текущая цена
   sheet.getRange(`F${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цель
   sheet.getRange(`G${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Общие вложения
-  sheet.getRange(`H${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Текущая стоимость
-  sheet.getRange(`I${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Текущая стоимость с комиссией
-  sheet.getRange(`J${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Профит
-  sheet.getRange(`K${row}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль %
-  sheet.getRange(`L${row}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль % с комиссией
-  sheet.getRange(`O${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min цена
-  sheet.getRange(`P${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Max цена
-  sheet.getRange(`R${row}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Дней смены
+  sheet.getRange(`H${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Текущая стоимость с комиссией (было I)
+  sheet.getRange(`I${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Профит (было J)
+  sheet.getRange(`J${row}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль % с комиссией (было L)
+  sheet.getRange(`L${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min цена (было N)
+  sheet.getRange(`M${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Max цена (было O)
+  sheet.getRange(`O${row}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Дней смены (было Q)
   
   // Устанавливаем высоту строки
   sheet.setRowHeight(row, ROW_HEIGHT)
@@ -285,7 +284,7 @@ function invest_formatTable() {
   const lastRow = sheet.getLastRow()
 
   // Используем константы для заголовков
-  const headers = HEADERS.INVEST.slice(0, 21) // Первые 21 колонок без 'Продать?'
+  const headers = HEADERS.INVEST // 19 колонок (убрали H и K)
 
   sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
   
@@ -303,7 +302,7 @@ function invest_formatTable() {
 
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.IMAGE), COLUMN_WIDTHS.IMAGE)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.NAME), COLUMN_WIDTHS.NAME)
-  sheet.setColumnWidths(3, 12, COLUMN_WIDTHS.WIDE)
+  sheet.setColumnWidths(3, 11, COLUMN_WIDTHS.WIDE) // C-M (11 колонок после удаления H и K)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.NARROW)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.DAYS_CHANGE), COLUMN_WIDTHS.MEDIUM)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.PHASE), COLUMN_WIDTHS.WIDE)
@@ -311,12 +310,12 @@ function invest_formatTable() {
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE)
 
   if (lastRow > 1) {
-    sheet.getRange(`D2:J${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
+    sheet.getRange(`D2:I${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // D-G, H (с комиссией), I (Профит)
     sheet.getRange(`F2:F${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цель - явное форматирование для гарантии
-    sheet.getRange(`K2:L${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT)
-    sheet.getRange(`O2:P${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
-    sheet.getRange(`R2:R${lastRow}`).setNumberFormat(NUMBER_FORMATS.INTEGER)
-    // Форматирование колонки Потенциал (S) как процент с знаком "+"
+    sheet.getRange(`J2:J${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль % с комиссией (было L)
+    sheet.getRange(`L2:M${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min, Max (было O-P)
+    sheet.getRange(`O2:O${lastRow}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Дней смены (было Q)
+    // Форматирование колонки Потенциал (Q) как процент с знаком "+"
     const potentialCol = getColumnIndex(INVEST_COLUMNS.POTENTIAL)
     sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1).setNumberFormat('+0%;-0%;"—"')
 
@@ -325,11 +324,11 @@ function invest_formatTable() {
 
     sheet.getRange(`A2:A${lastRow}`).setHorizontalAlignment('center')
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
-    sheet.getRange(`C2:U${lastRow}`).setHorizontalAlignment('center')
+    sheet.getRange(`C2:S${lastRow}`).setHorizontalAlignment('center') // До S (было U)
   }
 
   if (lastRow > 1) {
-    const profitRanges = sheet.getRange(`J2:L${lastRow}`)
+    const profitRanges = sheet.getRange(`I2:J${lastRow}`) // Профит и Прибыль % с комиссией (было J-L)
     const trendCol = getColumnIndex(INVEST_COLUMNS.TREND)
     const phaseCol = getColumnIndex(INVEST_COLUMNS.PHASE)
     const recommendationCol = getColumnIndex(INVEST_COLUMNS.RECOMMENDATION)
@@ -349,9 +348,9 @@ function invest_formatTable() {
   }
 
   sheet.setFrozenRows(HEADER_ROW)
-  // Добавляем колонку кнопки «Продать?» если отсутствует
+  // Добавляем колонку кнопки «Продать» если отсутствует
   const lastCol = sheet.getLastColumn()
-  const sellHeader = 'Продать?'
+  const sellHeader = 'Продать'
   let sellCol = null
   for (let c = 1; c <= lastCol; c++) {
     if (sheet.getRange(1, c).getValue() === sellHeader) {
@@ -367,7 +366,7 @@ function invest_formatTable() {
     rng.insertCheckboxes()
     rng.setHorizontalAlignment('center')
   }
-  // Стиль шапки «Продать?» как и остальные
+  // Стиль шапки «Продать» как и остальные
   formatHeaderRange_(sheet.getRange(HEADER_ROW, sellCol, 1, 1))
   SpreadsheetApp.getUi().alert('Форматирование завершено (Invest)')
 }
@@ -392,16 +391,15 @@ function invest_syncMinMaxFromHistory(updateAll = true) {
   return syncMinMaxFromHistoryUniversal_(sheet, minColIndex, maxColIndex, updateAll)
 }
 
-// Синхронизация Тренд/Дней смены из листа History по названию
+// Синхронизация Тренд из листа History по названию (теперь объединенный формат)
 function invest_syncTrendDaysFromHistory(updateAll = true) {
   const sheet = getInvestSheet_()
   if (!sheet) return
 
-  // INVEST_COLUMNS.TREND = 'P', INVEST_COLUMNS.DAYS_CHANGE = 'Q'
+  // INVEST_COLUMNS.TREND = 'N' (теперь содержит объединенный формат "🟥 Падает 35 дн.")
   const trendColIndex = getColumnIndex(INVEST_COLUMNS.TREND)
-  const daysColIndex = getColumnIndex(INVEST_COLUMNS.DAYS_CHANGE)
   
-  return syncTrendDaysFromHistoryUniversal_(sheet, trendColIndex, daysColIndex, updateAll)
+  return syncTrendFromHistoryUniversal_(sheet, trendColIndex, updateAll)
 }
 
 // Синхронизация расширенной аналитики (Фаза/Потенциал/Рекомендация) из History

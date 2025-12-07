@@ -193,11 +193,10 @@ function sales_syncTrendDaysFromHistory(updateAll = true) {
   const sheet = getSalesSheet_()
   if (!sheet) return
 
-  // SALES_COLUMNS.TREND = 'I', SALES_COLUMNS.DAYS_CHANGE = 'J'
+  // SALES_COLUMNS.TREND = 'I' (теперь содержит объединенный формат "🟥 Падает 35 дн.")
   const trendColIndex = getColumnIndex(SALES_COLUMNS.TREND)
-  const daysColIndex = getColumnIndex(SALES_COLUMNS.DAYS_CHANGE)
   
-  return syncTrendDaysFromHistoryUniversal_(sheet, trendColIndex, daysColIndex, updateAll)
+  return syncTrendFromHistoryUniversal_(sheet, trendColIndex, updateAll)
 }
 
 // Синхронизация расширенной аналитики (Фаза/Потенциал/Рекомендация) из History

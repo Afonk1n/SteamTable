@@ -17,20 +17,16 @@ function invest_calculateBatch_(sheet, currentPrices) {
   const quantityCol = getColumnIndex(INVEST_COLUMNS.QUANTITY)
   const buyPriceCol = getColumnIndex(INVEST_COLUMNS.BUY_PRICE)
   const totalInvCol = getColumnIndex(INVEST_COLUMNS.TOTAL_INVESTMENT)
-  const currentValCol = getColumnIndex(INVEST_COLUMNS.CURRENT_VALUE)
   const currentValAfterFeeCol = getColumnIndex(INVEST_COLUMNS.CURRENT_VALUE_AFTER_FEE)
   const profitCol = getColumnIndex(INVEST_COLUMNS.PROFIT)
-  const profitPercentCol = getColumnIndex(INVEST_COLUMNS.PROFIT_PERCENT)
   const profitAfterFeeCol = getColumnIndex(INVEST_COLUMNS.PROFIT_AFTER_FEE)
   
   const quantities = sheet.getRange(DATA_START_ROW, quantityCol, count, 1).getValues()
   const buyPrices = sheet.getRange(DATA_START_ROW, buyPriceCol, count, 1).getValues()
   
   const totalInvestments = []
-  const currentValues = []
   const currentValuesAfterFee = []
   const profits = []
-  const profitPercents = []
   const profitAfterFees = []
   
   for (let i = 0; i < count; i++) {
@@ -45,30 +41,23 @@ function invest_calculateBatch_(sheet, currentPrices) {
       const currentValue = quantity * currentPrice
       const currentValueAfterFee = currentValue * STEAM_FEE
       const profit = currentValueAfterFee - totalInvestment
-      const profitPercent = (currentValue / totalInvestment) - 1
       const profitAfterFee = (currentValueAfterFee / totalInvestment) - 1
       
       totalInvestments.push([totalInvestment])
-      currentValues.push([currentValue])
       currentValuesAfterFee.push([currentValueAfterFee])
       profits.push([profit])
-      profitPercents.push([profitPercent])
       profitAfterFees.push([profitAfterFee])
     } else {
       totalInvestments.push([null])
-      currentValues.push([null])
       currentValuesAfterFee.push([null])
       profits.push([null])
-      profitPercents.push([null])
       profitAfterFees.push([null])
     }
   }
   
   sheet.getRange(DATA_START_ROW, totalInvCol, count, 1).setValues(totalInvestments)
-  sheet.getRange(DATA_START_ROW, currentValCol, count, 1).setValues(currentValues)
   sheet.getRange(DATA_START_ROW, currentValAfterFeeCol, count, 1).setValues(currentValuesAfterFee)
   sheet.getRange(DATA_START_ROW, profitCol, count, 1).setValues(profits)
-  sheet.getRange(DATA_START_ROW, profitPercentCol, count, 1).setValues(profitPercents)
   sheet.getRange(DATA_START_ROW, profitAfterFeeCol, count, 1).setValues(profitAfterFees)
   
   invest_formatGoalColumn_(DATA_START_ROW, DATA_START_ROW + count - 1)
@@ -95,14 +84,11 @@ function invest_calculateSingle_(sheet, row, currentPrice) {
     const currentValue = quantity * currentPrice
     const currentValueAfterFee = currentValue * STEAM_FEE
     const profit = currentValueAfterFee - totalInvestment
-    const profitPercent = (currentValue / totalInvestment) - 1
     const profitAfterFee = (currentValueAfterFee / totalInvestment) - 1
     
     sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.TOTAL_INVESTMENT)).setValue(totalInvestment)
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.CURRENT_VALUE)).setValue(currentValue)
     sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.CURRENT_VALUE_AFTER_FEE)).setValue(currentValueAfterFee)
     sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.PROFIT)).setValue(profit)
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.PROFIT_PERCENT)).setValue(profitPercent)
     sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.PROFIT_AFTER_FEE)).setValue(profitAfterFee)
   }
   

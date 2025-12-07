@@ -27,15 +27,14 @@ function history_formatTable() {
   sheet.setColumnWidth(6, 120) // F - Текущая цена
   sheet.setColumnWidth(7, 100) // G - Min
   sheet.setColumnWidth(8, 100) // H - Max
-  sheet.setColumnWidth(9, 80)  // I - Trend
-  sheet.setColumnWidth(10, 100) // J - Days Change
-  sheet.setColumnWidth(11, 120) // K - Фаза
-  sheet.setColumnWidth(12, 100) // L - Потенциал
-  sheet.setColumnWidth(13, 130) // M - Рекомендация
+  sheet.setColumnWidth(9, 150)  // I - Trend (объединенный, шире)
+  sheet.setColumnWidth(10, 120) // J - Фаза (было K)
+  sheet.setColumnWidth(11, 100) // K - Потенциал (было L)
+  sheet.setColumnWidth(12, 130) // L - Рекомендация (было M)
 
   if (lastRow > 1) {
     sheet
-      .getRange(2, 1, lastRow - 1, 13)
+      .getRange(2, 1, lastRow - 1, 12)
       .setVerticalAlignment('middle')
       .setHorizontalAlignment('center')
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
@@ -48,7 +47,7 @@ function history_formatTable() {
   }
 
   sheet.setFrozenRows(HEADER_ROW)
-  // Дополнительно форматируем все существующие колонки дат (N и далее)
+  // Дополнительно форматируем все существующие колонки дат (M и далее, было N)
   history_formatAllDateColumns_(sheet)
   // Выделяем минимум и максимум (только визуальное форматирование)
   history_highlightMinMax_(sheet)
@@ -993,6 +992,26 @@ function history_calculateDaysChange_(prices, dates, currentTrend) {
   return 0 // Если не удалось вычислить
 }
 
+// Форматирует отображение дней смены с описанием тренда
+// Примеры: "🟥 Падает 35 дн.", "🟩 Растет 12 дн.", "🟨 Боковик 5 дн."
+function history_formatDaysChange_(trend, daysChange) {
+  if (!daysChange || daysChange === 0) {
+    return '—'
+  }
+  
+  const trendLabels = {
+    '🟥': 'Падает',
+    '🟩': 'Растет',
+    '🟨': 'Боковик',
+    '🟪': 'Нет данных'
+  }
+  
+  const label = trendLabels[trend] || 'Тренд'
+  const daysText = daysChange === 1 ? 'день' : (daysChange < 5 ? 'дня' : 'дн.')
+  
+  return `${trend} ${label} ${daysChange} ${daysText}.`
+}
+
 // ОПТИМИЗИРОВАННАЯ версия анализа тренда - работает с уже прочитанными данными (без запросов к таблице)
 function history_analyzeTrendFromPrices_(prices, dates) {
   if (prices.length < 2) return { trend: '🟪', daysChange: 0 }
@@ -1059,8 +1078,7 @@ function history_updateTrends() {
   
   // ОПТИМИЗАЦИЯ: Читаем все данные одним batch-запросом
   const names = sheet.getRange(DATA_START_ROW, 2, count, 1).getValues() // B
-  const trends = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.TREND), count, 1).getValues() // I
-  const daysChanges = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.DAYS_CHANGE), count, 1).getValues() // J
+  const trends = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.TREND), count, 1).getValues() // I (теперь содержит объединенный тренд+дни)
   const phases = sheet.getRange(DATA_START_ROW, phaseCol, count, 1).getValues()
   const potentials = sheet.getRange(DATA_START_ROW, potentialCol, count, 1).getValues()
   const recommendations = sheet.getRange(DATA_START_ROW, recommendationCol, count, 1).getValues()
@@ -1157,9 +1175,8 @@ function history_updateTrends() {
     // ОПТИМИЗАЦИЯ: Анализируем тренд используя уже собранные данные (без дополнительных запросов к таблице)
     const analysis = history_analyzeTrendFromPrices_(prices, dates)
     
-    // Базовый анализ тренда
-    trends[i][0] = analysis.trend
-    daysChanges[i][0] = analysis.daysChange
+    // Базовый анализ тренда - объединяем тренд и дни смены в одну колонку
+    trends[i][0] = history_formatDaysChange_(analysis.trend, analysis.daysChange)
     
     // Расширенный анализ
     if (prices.length >= 7) {
@@ -1167,11 +1184,18 @@ function history_updateTrends() {
       const potential = history_calculateGrowthPotential_(prices)
       // Храним числовое значение для сортировки (в процентах, например 14 для +14%)
       potentials[i][0] = potential ? potential.to85th / 100 : null
+      // Извлекаем чистый тренд и дни смены из объединенного формата для рекомендаций
+      const trendStr = String(trends[i][0] || '')
+      const trendMatch = trendStr.match(/^([🟥🟩🟨🟪])/)
+      const daysMatch = trendStr.match(/(\d+)\s+дн?\.?/)
+      const cleanTrend = trendMatch ? trendMatch[1] : '🟪'
+      const daysChange = daysMatch ? parseInt(daysMatch[1], 10) : 0
+      
       recommendations[i][0] = history_generateRecommendation_(
         phases[i][0],
-        trends[i][0],
+        cleanTrend,
         potential,
-        daysChanges[i][0]
+        daysChange
       )
     } else {
       phases[i][0] = '❓'
@@ -1184,9 +1208,7 @@ function history_updateTrends() {
   
   // Batch обновление всех данных за одну операцию
   const trendCol = getColumnIndex(HISTORY_COLUMNS.TREND)
-  const daysChangeCol = getColumnIndex(HISTORY_COLUMNS.DAYS_CHANGE)
   sheet.getRange(DATA_START_ROW, trendCol, count, 1).setValues(trends)
-  sheet.getRange(DATA_START_ROW, daysChangeCol, count, 1).setValues(daysChanges)
   sheet.getRange(DATA_START_ROW, phaseCol, count, 1).setValues(phases)
   sheet.getRange(DATA_START_ROW, potentialCol, count, 1).setValues(potentials)
   sheet.getRange(DATA_START_ROW, recommendationCol, count, 1).setValues(recommendations)
