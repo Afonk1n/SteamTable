@@ -12,6 +12,28 @@
  */
 function createTrendFormattingRules_(trendRange) {
   return [
+    // Форматирование для объединенного формата "🟩 Растет 12 дн." - проверяем начало строки
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextStartsWith('🟩')
+      .setBackground(COLORS.TREND_UP)
+      .setRanges([trendRange])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextStartsWith('🟥')
+      .setBackground(COLORS.TREND_DOWN)
+      .setRanges([trendRange])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextStartsWith('🟨')
+      .setBackground(COLORS.TREND_SIDEWAYS)
+      .setRanges([trendRange])
+      .build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextStartsWith('🟪')
+      .setBackground(COLORS.TREND_UNKNOWN)
+      .setRanges([trendRange])
+      .build(),
+    // Обратная совместимость: если формат старый (только эмодзи)
     SpreadsheetApp.newConditionalFormatRule()
       .whenTextEqualTo('🟩')
       .setBackground(COLORS.TREND_UP)

@@ -65,7 +65,8 @@ function onOpen() {
     .addItem('Включить автообновление', 'setupAllTriggers')
     .addItem('Выключить автообновление', 'removeAllTriggers')
     .addSeparator()
-    .addItem('Синхронизировать цены из History', 'syncPricesFromHistoryToInvestAndSales')
+    .addItem('Инициализировать все таблицы', 'initializeAllTables')
+    .addSeparator()
     .addItem('Обновить цены History (ручное)', 'history_updateAllPrices')
     .addSeparator()
     // Сокращённые меню
@@ -73,7 +74,6 @@ function onOpen() {
       .addItem('Форматирование', 'invest_formatTable')
       .addItem('Изображение и ссылки', 'invest_updateImagesAndLinks')
       .addItem('Поиск дублей', 'invest_findDuplicates')
-      .addItem('Обновить аналитику портфеля', 'portfolioStats_formatTable')
     )
     .addSubMenu(ui.createMenu('Sales')
       .addItem('Форматирование', 'sales_formatTable')
@@ -87,7 +87,11 @@ function onOpen() {
       .addItem('Дубли названий', 'history_findDuplicates')
       .addItem('Создать столбец текущего периода', 'history_ensureTodayColumn')
     )
+    .addSubMenu(ui.createMenu('PortfolioStats')
+      .addItem('Обновить аналитику', 'portfolioStats_formatTable')
+    )
     .addSeparator()
+    .addItem('Синхронизировать цены из History', 'syncPricesFromHistoryToInvestAndSales')
     .addItem('Обновить аналитику Invest/Sales', 'syncAnalyticsForInvestSales_')
     .addSeparator()
     .addSubMenu(ui.createMenu('Telegram')
@@ -95,6 +99,20 @@ function onOpen() {
       .addItem('Тест Telegram', 'telegram_testConnection')
     )
     .addToUi()
+}
+
+// Инициализация всех таблиц (форматирование и настройка)
+function initializeAllTables() {
+  try {
+    invest_formatTable()
+    sales_formatTable()
+    history_formatTable()
+    portfolioStats_formatTable()
+    SpreadsheetApp.getUi().alert('✅ Все таблицы инициализированы и отформатированы')
+  } catch (e) {
+    console.error('Menu: ошибка инициализации таблиц:', e)
+    SpreadsheetApp.getUi().alert('Ошибка инициализации таблиц: ' + e.message)
+  }
 }
 
 // Единая синхронизация аналитики для Invest/Sales

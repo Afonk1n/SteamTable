@@ -47,7 +47,7 @@ function portfolioStats_update() {
   const phases = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PHASE), count, 1).getValues()
   const trends = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.TREND), count, 1).getValues()
   
-  // Рассчитываем метрики
+  // Рассчитываем метрики (теперь с именами для изображений)
   const stats = portfolioStats_calculateMetrics_(
     names, quantities, totalInvestments, currentValues, profits, profitPercents, phases, trends
   )
@@ -117,17 +117,35 @@ function portfolioStats_calculateMetrics_(names, quantities, totalInvestments, c
     }
     
     // Распределение по трендам (извлекаем эмодзи из объединенного формата)
-    if (trend) {
-      const trendMatch = trend.match(/^([🟥🟩🟨🟪])/)
-      const trendEmoji = trendMatch ? trendMatch[1] : '🟪'
-      trendDistribution.set(trendEmoji, (trendDistribution.get(trendEmoji) || 0) + 1)
+    const trendStr = String(trend || '').trim()
+    let trendEmoji = '🟪' // По умолчанию
+    
+    if (trendStr) {
+      // Проверяем начало строки на эмодзи тренда
+      if (trendStr.startsWith('🟩')) {
+        trendEmoji = '🟩'
+      } else if (trendStr.startsWith('🟥')) {
+        trendEmoji = '🟥'
+      } else if (trendStr.startsWith('🟨')) {
+        trendEmoji = '🟨'
+      } else if (trendStr.startsWith('🟪')) {
+        trendEmoji = '🟪'
+      } else {
+        // Пробуем через regex как fallback
+        const trendMatch = trendStr.match(/^([🟥🟩🟨🟪])/)
+        if (trendMatch) {
+          trendEmoji = trendMatch[1]
+        }
+      }
     }
+    
+    trendDistribution.set(trendEmoji, (trendDistribution.get(trendEmoji) || 0) + 1)
   }
   
-  // Сортируем позиции по прибыльности
-  positions.sort((a, b) => b.profit - a.profit)
-  const top5Profitable = positions.slice(0, 5)
-  const top5Unprofitable = positions.slice(-5).reverse()
+  // Сортируем позиции по проценту прибыльности (а не по рублям)
+  positions.sort((a, b) => b.profitPercent - a.profitPercent)
+  const top5Profitable = positions.filter(p => p.profitPercent > 0).slice(0, 5)
+  const top5Unprofitable = positions.filter(p => p.profitPercent < 0).sort((a, b) => a.profitPercent - b.profitPercent).slice(0, 5)
   
   // Средняя прибыльность
   const avgProfitability = totalPositions > 0 
@@ -168,61 +186,77 @@ function portfolioStats_formatAndFill_(sheet, stats) {
   sheet.getRange(1, 1).setFontSize(16).setFontWeight('bold')
   sheet.setRowHeight(1, 40)
   
-  // Общие показатели
+  // Общие показатели - оформляем в таблицу
   let row = 3
   sheet.getRange(row, 1).setValue('Общие показатели').setFontWeight('bold').setFontSize(12)
   row++
   
-  sheet.getRange(row, 1).setValue('Общая сумма вложений:')
-  sheet.getRange(row, 2).setValue(stats.totalInvestment).setNumberFormat(NUMBER_FORMATS.CURRENCY)
+  // Заголовки таблицы
+  sheet.getRange(row, 1, 1, 2).setValues([['Показатель', 'Значение']])
+  formatHeaderRange_(sheet.getRange(row, 1, 1, 2))
   row++
   
-  sheet.getRange(row, 1).setValue('Текущая стоимость:')
-  sheet.getRange(row, 2).setValue(stats.totalCurrentValue).setNumberFormat(NUMBER_FORMATS.CURRENCY)
-  row++
+  // Данные таблицы
+  const generalData = [
+    ['Общая сумма вложений', stats.totalInvestment],
+    ['Текущая стоимость', stats.totalCurrentValue],
+    ['Прибыль/убыток', stats.totalProfit],
+    ['Прибыль/убыток (%)', stats.totalProfitPercent],
+    ['Средняя прибыльность', stats.avgProfitability],
+    ['Активных позиций', stats.totalPositions]
+  ]
   
-  sheet.getRange(row, 1).setValue('Прибыль/убыток:')
-  sheet.getRange(row, 2).setValue(stats.totalProfit).setNumberFormat(NUMBER_FORMATS.CURRENCY)
-  sheet.getRange(row, 3).setValue(stats.totalProfitPercent).setNumberFormat(NUMBER_FORMATS.PERCENT)
-  // Цветовая индикация
+  sheet.getRange(row, 1, generalData.length, 2).setValues(generalData)
+  // Форматирование чисел
+  sheet.getRange(row, 2, 2, 1).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Вложения и стоимость
+  sheet.getRange(row + 2, 2, 1, 1).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Прибыль/убыток
+  sheet.getRange(row + 3, 2, 1, 1).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль/убыток %
+  sheet.getRange(row + 4, 2, 1, 1).setNumberFormat(NUMBER_FORMATS.PERCENT) // Средняя прибыльность
+  sheet.getRange(row + 5, 2, 1, 1).setNumberFormat(NUMBER_FORMATS.INTEGER) // Количество позиций
+  
+  // Цветовая индикация для прибыли/убытка
   if (stats.totalProfit > 0) {
-    sheet.getRange(row, 2, 1, 2).setBackground(COLORS.PROFIT)
+    sheet.getRange(row + 2, 1, 1, 2).setBackground(COLORS.PROFIT)
   } else if (stats.totalProfit < 0) {
-    sheet.getRange(row, 2, 1, 2).setBackground(COLORS.LOSS)
+    sheet.getRange(row + 2, 1, 1, 2).setBackground(COLORS.LOSS)
   }
-  row++
   
-  sheet.getRange(row, 1).setValue('Средняя прибыльность:')
-  sheet.getRange(row, 2).setValue(stats.avgProfitability).setNumberFormat(NUMBER_FORMATS.PERCENT)
-  row++
-  
-  sheet.getRange(row, 1).setValue('Активных позиций:')
-  sheet.getRange(row, 2).setValue(stats.totalPositions).setNumberFormat(NUMBER_FORMATS.INTEGER)
-  row++
+  row += generalData.length
   
   // Топ-5 прибыльных
   row += 2
   sheet.getRange(row, 1).setValue('Топ-5 прибыльных').setFontWeight('bold').setFontSize(12)
   row++
   
-  // Заголовки таблицы
-  sheet.getRange(row, 1, 1, 4).setValues([['Название', 'Прибыль', 'Прибыль %', 'Вложения']])
-  formatHeaderRange_(sheet.getRange(row, 1, 1, 4))
+  // Заголовки таблицы (с изображением)
+  sheet.getRange(row, 1, 1, 5).setValues([['Изображение', 'Название', 'Прибыль', 'Прибыль %', 'Вложения']])
+  formatHeaderRange_(sheet.getRange(row, 1, 1, 5))
   row++
   
-  // Данные
+  // Данные (с изображениями)
   const profitableData = stats.top5Profitable.map(p => [
+    '', // Изображение будет добавлено отдельно
     p.name,
     p.profit,
     p.profitPercent,
     p.investment
   ])
   if (profitableData.length > 0) {
-    sheet.getRange(row, 1, profitableData.length, 4).setValues(profitableData)
+    sheet.getRange(row, 1, profitableData.length, 5).setValues(profitableData)
+    // Добавляем изображения
+    for (let i = 0; i < profitableData.length; i++) {
+      const item = stats.top5Profitable[i]
+      if (item && item.name) {
+        const imageFormula = buildImageAndLinkFormula_(STEAM_APP_ID, item.name).image
+        sheet.getRange(row + i, 1).setFormula(imageFormula)
+      }
+    }
     sheet.getRange(row, 2, profitableData.length, 1).setNumberFormat(NUMBER_FORMATS.CURRENCY)
     sheet.getRange(row, 3, profitableData.length, 1).setNumberFormat(NUMBER_FORMATS.PERCENT)
     sheet.getRange(row, 4, profitableData.length, 1).setNumberFormat(NUMBER_FORMATS.CURRENCY)
-    sheet.getRange(row, 1, profitableData.length, 4).setBackground(COLORS.PROFIT)
+    sheet.getRange(row, 1, profitableData.length, 5).setBackground(COLORS.PROFIT)
+    // Устанавливаем ширину колонки изображения
+    sheet.setColumnWidth(1, COLUMN_WIDTHS.IMAGE)
     row += profitableData.length
   } else {
     sheet.getRange(row, 1).setValue('Нет данных')
@@ -234,24 +268,33 @@ function portfolioStats_formatAndFill_(sheet, stats) {
   sheet.getRange(row, 1).setValue('Топ-5 убыточных').setFontWeight('bold').setFontSize(12)
   row++
   
-  // Заголовки таблицы
-  sheet.getRange(row, 1, 1, 4).setValues([['Название', 'Убыток', 'Убыток %', 'Вложения']])
-  formatHeaderRange_(sheet.getRange(row, 1, 1, 4))
+  // Заголовки таблицы (с изображением)
+  sheet.getRange(row, 1, 1, 5).setValues([['Изображение', 'Название', 'Убыток', 'Убыток %', 'Вложения']])
+  formatHeaderRange_(sheet.getRange(row, 1, 1, 5))
   row++
   
-  // Данные
+  // Данные (с изображениями)
   const unprofitableData = stats.top5Unprofitable.map(p => [
+    '', // Изображение будет добавлено отдельно
     p.name,
     p.profit,
     p.profitPercent,
     p.investment
   ])
   if (unprofitableData.length > 0) {
-    sheet.getRange(row, 1, unprofitableData.length, 4).setValues(unprofitableData)
+    sheet.getRange(row, 1, unprofitableData.length, 5).setValues(unprofitableData)
+    // Добавляем изображения
+    for (let i = 0; i < unprofitableData.length; i++) {
+      const item = stats.top5Unprofitable[i]
+      if (item && item.name) {
+        const imageFormula = buildImageAndLinkFormula_(STEAM_APP_ID, item.name).image
+        sheet.getRange(row + i, 1).setFormula(imageFormula)
+      }
+    }
     sheet.getRange(row, 2, unprofitableData.length, 1).setNumberFormat(NUMBER_FORMATS.CURRENCY)
     sheet.getRange(row, 3, unprofitableData.length, 1).setNumberFormat(NUMBER_FORMATS.PERCENT)
     sheet.getRange(row, 4, unprofitableData.length, 1).setNumberFormat(NUMBER_FORMATS.CURRENCY)
-    sheet.getRange(row, 1, unprofitableData.length, 4).setBackground(COLORS.LOSS)
+    sheet.getRange(row, 1, unprofitableData.length, 5).setBackground(COLORS.LOSS)
     row += unprofitableData.length
   } else {
     sheet.getRange(row, 1).setValue('Нет данных')
@@ -307,11 +350,9 @@ function portfolioStats_formatAndFill_(sheet, stats) {
     sheet.getRange(row, 1).setValue('Нет данных')
   }
   
-  // Форматирование колонок
-  sheet.setColumnWidth(1, 200)
-  sheet.setColumnWidth(2, 150)
-  sheet.setColumnWidth(3, 120)
-  sheet.setColumnWidth(4, 150)
+  // Форматирование колонок (с учетом колонки изображений в топ-5)
+  // Колонка изображений уже установлена выше (COLUMN_WIDTHS.IMAGE)
+  // Остальные колонки форматируются автоматически через setColumnWidths в начале функции
   
   // Выравнивание
   sheet.getRange(1, 1, row + 10, 4).setVerticalAlignment('middle')

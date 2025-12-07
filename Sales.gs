@@ -22,11 +22,11 @@ function sales_formatNewRow_(sheet, row) {
   // Форматы чисел (используем константы)
   sheet.getRange(`C${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цена продажи
   sheet.getRange(`D${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Текущая цена
-  sheet.getRange(`E${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Падение цены
-  sheet.getRange(`H${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min цена
-  sheet.getRange(`I${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Max цена
-  sheet.getRange(`K${row}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Дней смены
-  // Форматирование колонки Потенциал (L) как процент с знаком "+"
+  sheet.getRange(`E${row}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Процент просадки
+  sheet.getRange(`G${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min цена (было H)
+  sheet.getRange(`H${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Max цена (было I)
+  // Колонка Дней смены (была J) удалена, ее данные теперь в Тренд (I)
+  // Форматирование колонки Потенциал (K) как процент с знаком "+"
   const potentialCol = getColumnIndex(SALES_COLUMNS.POTENTIAL)
   sheet.getRange(row, potentialCol).setNumberFormat('+0%;-0%;"—"')
   
@@ -104,6 +104,13 @@ function sales_formatTable() {
 
   // Используем константы для заголовков
   const headers = HEADERS.SALES
+  
+  // Проверка на undefined
+  if (!headers || !Array.isArray(headers) || headers.length === 0) {
+    console.error('Sales: HEADERS.SALES не определен или пуст')
+    SpreadsheetApp.getUi().alert('Ошибка: заголовки Sales не определены')
+    return
+  }
 
   sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
   
@@ -127,8 +134,7 @@ function sales_formatTable() {
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.LINK), COLUMN_WIDTHS.NARROW)
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.MIN_PRICE), COLUMN_WIDTHS.MEDIUM)
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.MAX_PRICE), COLUMN_WIDTHS.WIDE)
-  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.TREND), COLUMN_WIDTHS.NARROW)
-  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.DAYS_CHANGE), COLUMN_WIDTHS.MEDIUM)
+  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.TREND), COLUMN_WIDTHS.WIDE) // Объединенный формат, шире для текста
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.PHASE), COLUMN_WIDTHS.WIDE)
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.POTENTIAL), COLUMN_WIDTHS.MEDIUM)
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE)
@@ -136,9 +142,9 @@ function sales_formatTable() {
   if (lastRow > 1) {
     sheet.getRange(`C2:D${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
     sheet.getRange(`E2:E${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT)
-    sheet.getRange(`H2:I${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
-    sheet.getRange(`K2:K${lastRow}`).setNumberFormat(NUMBER_FORMATS.INTEGER)
-    // Форматирование колонки Потенциал (L) как процент с знаком "+"
+    sheet.getRange(`G2:H${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min, Max (было H-I)
+    // Колонка Дней смены (была J) удалена, ее данные теперь в Тренд (I)
+    // Форматирование колонки Потенциал (K) как процент с знаком "+"
     const potentialCol = getColumnIndex(SALES_COLUMNS.POTENTIAL)
     sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1).setNumberFormat('+0%;-0%;"—"')
 

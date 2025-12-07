@@ -397,7 +397,7 @@ function history_updateImagesAndLinks() {
         imageFormulas[i][0] = built.image
         linkFormulas[i][0] = built.link
         updatedCount++
-        Utilities.sleep(1000)
+        Utilities.sleep(100) // Оптимизировано: было 1000мс, стало 100мс (как в Invest/Sales)
       } catch (e) {
         console.error('History: ошибка при подготовке формул', i + 2, e)
         errorCount++
@@ -1007,9 +1007,8 @@ function history_formatDaysChange_(trend, daysChange) {
   }
   
   const label = trendLabels[trend] || 'Тренд'
-  const daysText = daysChange === 1 ? 'день' : (daysChange < 5 ? 'дня' : 'дн.')
   
-  return `${trend} ${label} ${daysChange} ${daysText}.`
+  return `${trend} ${label} ${daysChange} д.`
 }
 
 // ОПТИМИЗИРОВАННАЯ версия анализа тренда - работает с уже прочитанными данными (без запросов к таблице)

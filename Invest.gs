@@ -314,7 +314,7 @@ function invest_formatTable() {
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.IMAGE), COLUMN_WIDTHS.IMAGE)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.NAME), COLUMN_WIDTHS.NAME)
   sheet.setColumnWidths(3, 11, COLUMN_WIDTHS.WIDE) // C-M (11 колонок после удаления H и K)
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.MEDIUM) // Объединенный формат, шире
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.WIDE) // Объединенный формат, шире для текста
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.PHASE), COLUMN_WIDTHS.WIDE)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.POTENTIAL), COLUMN_WIDTHS.MEDIUM)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE)
