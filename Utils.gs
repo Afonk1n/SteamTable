@@ -309,22 +309,16 @@ function history_createPeriodAndUpdate() {
         logAutoAction_('Unified', 'Ошибка обновления трендов', 'ERROR')
       }
       
-      // Обновляем аналитику в Invest/Sales после завершения периода
+      // Сохраняем историю портфеля (только после дневного сбора)
+      // Примечание: аналитика Invest/Sales уже обновлена в syncPricesFromHistoryToInvestAndSales()
       try {
-        invest_syncMinMaxFromHistory()
-        invest_syncTrendDaysFromHistory()
-        invest_syncExtendedAnalyticsFromHistory()
-        sales_syncMinMaxFromHistory()
-        sales_syncTrendDaysFromHistory()
-        sales_syncExtendedAnalyticsFromHistory()
-        // Сохраняем историю портфеля (только после дневного сбора)
         if (period === PRICE_COLLECTION_PERIODS.EVENING) {
           portfolioStats_saveHistory_()
+          console.log(`Unified: история портфеля сохранена`)
         }
-        console.log(`Unified: аналитика в Invest/Sales и портфеля обновлена`)
       } catch (e) {
-        console.error('Unified: ошибка при обновлении аналитики в Invest/Sales:', e)
-        logAutoAction_('Unified', 'Ошибка обновления аналитики', 'ERROR')
+        console.error('Unified: ошибка при сохранении истории портфеля:', e)
+        logAutoAction_('Unified', 'Ошибка сохранения истории портфеля', 'ERROR')
       }
       
       logAutoAction_('Unified', `Сбор цен завершен (${period})`, 'OK')
@@ -390,22 +384,16 @@ function unified_priceUpdate() {
         logAutoAction_('Unified', 'Ошибка обновления трендов', 'ERROR')
       }
       
-      // Обновляем аналитику в Invest/Sales после завершения периода
+      // Сохраняем историю портфеля (только после дневного сбора)
+      // Примечание: аналитика Invest/Sales уже обновлена в syncPricesFromHistoryToInvestAndSales()
       try {
-        invest_syncMinMaxFromHistory()
-        invest_syncTrendDaysFromHistory()
-        invest_syncExtendedAnalyticsFromHistory()
-        sales_syncMinMaxFromHistory()
-        sales_syncTrendDaysFromHistory()
-        sales_syncExtendedAnalyticsFromHistory()
-        // Сохраняем историю портфеля (только после дневного сбора)
         if (period === PRICE_COLLECTION_PERIODS.EVENING) {
           portfolioStats_saveHistory_()
+          console.log(`Unified: история портфеля сохранена`)
         }
-        console.log(`Unified: аналитика в Invest/Sales и портфеля обновлена`)
       } catch (e) {
-        console.error('Unified: ошибка при обновлении аналитики в Invest/Sales:', e)
-        logAutoAction_('Unified', 'Ошибка обновления аналитики', 'ERROR')
+        console.error('Unified: ошибка при сохранении истории портфеля:', e)
+        logAutoAction_('Unified', 'Ошибка сохранения истории портфеля', 'ERROR')
       }
       
       logAutoAction_('Unified', `Сбор цен завершен (${period})`, 'OK')

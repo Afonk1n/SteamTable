@@ -223,3 +223,17 @@ function portfolioStats_formatTable() {
 function portfolioStats_update() {
   portfolioStats_formatTable()
 }
+
+/**
+ * Ручное сохранение текущих метрик портфеля в историю (для тестирования)
+ * Можно вызывать из меню для проверки работы сохранения истории
+ */
+function portfolioStats_saveHistoryManual() {
+  try {
+    portfolioStats_saveHistory_()
+    SpreadsheetApp.getUi().alert('✅ Метрики портфеля сохранены в историю')
+  } catch (e) {
+    console.error('PortfolioStats: ошибка при ручном сохранении истории:', e)
+    SpreadsheetApp.getUi().alert('❌ Ошибка при сохранении истории: ' + e.message)
+  }
+}

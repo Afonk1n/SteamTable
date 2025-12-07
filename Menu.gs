@@ -96,6 +96,7 @@ function onOpen() {
     )
     .addSubMenu(ui.createMenu('PortfolioStats')
       .addItem('Форматирование', 'portfolioStats_formatTable')
+      .addItem('Сохранить строку истории (тест)', 'portfolioStats_saveHistoryManual')
     )
     .addSeparator()
     .addItem('Синхронизировать цены из History', 'syncPricesFromHistoryToInvestAndSales')
