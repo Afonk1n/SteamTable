@@ -198,3 +198,86 @@ function applyAnalyticsFormatting_(sheet, config, lastRow) {
   sheet.setConditionalFormatRules(rules)
 }
 
+/**
+ * Универсальная функция для базового форматирования таблицы Invest/Sales
+ * @param {Sheet} sheet - Лист для форматирования
+ * @param {Array<string>} headers - Массив заголовков
+ * @param {Object} columns - Объект с колонками (INVEST_COLUMNS или SALES_COLUMNS)
+ * @param {Function} getSheetFn - Функция для получения листа (для валидации)
+ * @param {string} sheetName - Имя листа для ошибок
+ * @returns {number} lastRow - Последняя строка или 0 если ошибка
+ */
+function formatTableBase_(sheet, headers, columns, getSheetFn, sheetName) {
+  if (!sheet || !headers || !Array.isArray(headers) || headers.length === 0) {
+    console.error(`${sheetName}: некорректные параметры для форматирования`)
+    if (headers && !Array.isArray(headers)) {
+      SpreadsheetApp.getUi().alert(`Ошибка: заголовки ${sheetName} не определены`)
+    }
+    return 0
+  }
+  
+  const lastRow = sheet.getLastRow()
+  
+  // Устанавливаем заголовки
+  sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
+  
+  // Проверяем и исправляем заголовок "Потенциал" на "Потенциал (P85)" если нужно
+  const potentialColIndex = getColumnIndex(columns.POTENTIAL)
+  if (potentialColIndex > 0) {
+    const currentPotentialHeader = sheet.getRange(HEADER_ROW, potentialColIndex).getValue()
+    if (currentPotentialHeader && currentPotentialHeader !== 'Потенциал (P85)') {
+      sheet.getRange(HEADER_ROW, potentialColIndex).setValue('Потенциал (P85)')
+    }
+  }
+  
+  // Форматируем заголовок
+  formatHeaderRange_(sheet.getRange(HEADER_ROW, 1, 1, headers.length))
+  
+  // Устанавливаем высоты строк
+  sheet.setRowHeight(HEADER_ROW, HEADER_HEIGHT)
+  if (lastRow > 1) {
+    sheet.setRowHeights(DATA_START_ROW, lastRow - 1, ROW_HEIGHT)
+  }
+  
+  // Замораживаем строку заголовка
+  sheet.setFrozenRows(HEADER_ROW)
+  
+  return lastRow
+}
+
+/**
+ * Универсальная функция для форматирования новой строки в Invest/Sales
+ * @param {Sheet} sheet - Лист для форматирования
+ * @param {number} row - Номер строки
+ * @param {Object} config - Конфигурация (COLUMNS, STEAM_APPID для Sales)
+ * @param {Object} numberFormatConfig - Конфигурация форматов чисел {columnKey: format}
+ * @param {boolean} addImageAndLink - Добавлять ли изображение и ссылку (для Sales)
+ */
+function formatNewRowUniversal_(sheet, row, config, numberFormatConfig, addImageAndLink = false) {
+  if (row <= HEADER_ROW) return
+  
+  const name = sheet.getRange(`B${row}`).getValue()
+  if (!name) return
+  
+  // Базовое форматирование строки
+  const numCols = getColumnIndex(config.COLUMNS.RECOMMENDATION)
+  sheet.getRange(row, 1, 1, numCols).setVerticalAlignment('middle').setHorizontalAlignment('center')
+  sheet.getRange(`B${row}`).setHorizontalAlignment('left')
+  
+  // Форматы чисел
+  for (const [columnKey, format] of Object.entries(numberFormatConfig)) {
+    const colIndex = getColumnIndex(config.COLUMNS[columnKey])
+    if (colIndex > 0) {
+      sheet.getRange(row, colIndex).setNumberFormat(format)
+    }
+  }
+  
+  // Добавляем изображение и ссылку (только для Sales)
+  if (addImageAndLink && config.STEAM_APPID) {
+    setImageAndLink_(sheet, row, config.STEAM_APPID, name, config.COLUMNS)
+  }
+  
+  // Устанавливаем высоту строки
+  sheet.setRowHeight(row, ROW_HEIGHT)
+}
+

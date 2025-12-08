@@ -6,35 +6,21 @@ const SALES_CONFIG = {
   COLUMNS: SALES_COLUMNS,
 }
 
-const SALES_SHEET_NAME = SHEET_NAMES.SALES
-
 // Форматирование новой строки Sales (при добавлении из Invest)
 function sales_formatNewRow_(sheet, row) {
-  if (row <= HEADER_ROW) return
-  const name = sheet.getRange(`B${row}`).getValue()
-  if (!name) return
+  const numberFormatConfig = {
+    SELL_PRICE: NUMBER_FORMATS.CURRENCY,    // C: Цена продажи
+    CURRENT_PRICE: NUMBER_FORMATS.CURRENCY, // D: Текущая цена
+    PRICE_DROP: NUMBER_FORMATS.PERCENT,     // E: Процент просадки
+    MIN_PRICE: NUMBER_FORMATS.CURRENCY,     // G: Min цена
+    MAX_PRICE: NUMBER_FORMATS.CURRENCY      // H: Max цена
+  }
   
-  // Базовое форматирование строки (A-M = 13 колонок без статуса)
-  const numCols = getColumnIndex(SALES_COLUMNS.RECOMMENDATION)
-  sheet.getRange(row, 1, 1, numCols).setVerticalAlignment('middle').setHorizontalAlignment('center')
-  sheet.getRange(`B${row}`).setHorizontalAlignment('left')
+  formatNewRowUniversal_(sheet, row, SALES_CONFIG, numberFormatConfig, true)
   
-  // Форматы чисел (используем константы)
-  sheet.getRange(`C${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цена продажи
-  sheet.getRange(`D${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Текущая цена
-  sheet.getRange(`E${row}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Процент просадки
-  sheet.getRange(`G${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min цена (было H)
-  sheet.getRange(`H${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Max цена (было I)
-  // Колонка Дней смены (была J) удалена, ее данные теперь в Тренд (I)
-  // Форматирование колонки Потенциал (K) как процент с знаком "+"
+  // Специальное форматирование колонки Потенциал (K) как процент с знаком "+"
   const potentialCol = getColumnIndex(SALES_COLUMNS.POTENTIAL)
   sheet.getRange(row, potentialCol).setNumberFormat('+0%;-0%;"—"')
-  
-  // Добавляем изображение и ссылку
-  setImageAndLink_(sheet, row, SALES_CONFIG.STEAM_APPID, name, SALES_CONFIG.COLUMNS)
-  
-  // Устанавливаем высоту строки
-  sheet.setRowHeight(row, ROW_HEIGHT)
 }
 
 // Функции getSalesSheet_ и getOrCreateSalesSheet_ перенесены в SheetService.gs
@@ -50,9 +36,8 @@ function sales_dailyReset() {
   ]
   rangesToClear.forEach(range => sheet.getRange(range).clearContent())
 
-  sales_syncMinMaxFromHistory()
-  sales_syncTrendDaysFromHistory()
-  sales_syncExtendedAnalyticsFromHistory()
+  // ИСПРАВЛЕНИЕ: Синхронизация аналитики убрана отсюда, так как она выполняется в syncPricesFromHistoryToInvestAndSales()
+  // Это предотвращает двойную синхронизацию аналитики
 
   try {
     logAutoAction_('Sales', 'Ежедневный сброс', 'OK')
@@ -64,7 +49,7 @@ function sales_dailyReset() {
 function sales_updateSinglePrice(row) {
   const sheet = getSalesSheet_()
   if (!sheet) return 'error'
-  const historySheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+  const historySheet = getHistorySheet_()
   if (!historySheet) return 'error'
   
   const itemName = sheet.getRange(`${SALES_CONFIG.COLUMNS.NAME}${row}`).getValue()
@@ -100,31 +85,11 @@ function sales_updateImagesAndLinks() {
 
 function sales_formatTable() {
   const sheet = getOrCreateSalesSheet_()
-  const lastRow = sheet.getLastRow()
-
-  // Используем константы для заголовков
   const headers = HEADERS.SALES
   
-  // Проверка на undefined
-  if (!headers || !Array.isArray(headers) || headers.length === 0) {
-    console.error('Sales: HEADERS.SALES не определен или пуст')
-    SpreadsheetApp.getUi().alert('Ошибка: заголовки Sales не определены')
-    return
-  }
-
-  sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
-  
-  // Проверяем и исправляем заголовок "Потенциал" на "Потенциал (P85)" если нужно
-  const potentialColIndex = getColumnIndex(SALES_COLUMNS.POTENTIAL)
-  const currentPotentialHeader = sheet.getRange(HEADER_ROW, potentialColIndex).getValue()
-  if (currentPotentialHeader && currentPotentialHeader !== 'Потенциал (P85)') {
-    sheet.getRange(HEADER_ROW, potentialColIndex).setValue('Потенциал (P85)')
-  }
-
-  formatHeaderRange_(sheet.getRange(HEADER_ROW, 1, 1, headers.length))
-
-  sheet.setRowHeight(HEADER_ROW, HEADER_HEIGHT)
-  if (lastRow > 1) sheet.setRowHeights(DATA_START_ROW, lastRow - 1, ROW_HEIGHT)
+  // Базовое форматирование таблицы
+  const lastRow = formatTableBase_(sheet, headers, SALES_COLUMNS, getSalesSheet_, 'Sales')
+  if (lastRow === 0) return
 
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.IMAGE), COLUMN_WIDTHS.IMAGE)
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.NAME), COLUMN_WIDTHS.NAME)
@@ -171,7 +136,7 @@ function sales_formatTable() {
     sheet.setConditionalFormatRules([])
   }
 
-  sheet.setFrozenRows(HEADER_ROW)
+  // Заморозка строки уже выполнена в formatTableBase_()
   SpreadsheetApp.getUi().alert('Форматирование завершено (Sales)')
 }
 

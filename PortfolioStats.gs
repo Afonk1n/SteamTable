@@ -6,8 +6,6 @@
  * - Позволяет анализировать динамику портфеля за периоды
  */
 
-const PORTFOLIO_STATS_SHEET_NAME = SHEET_NAMES.PORTFOLIO_STATS
-
 // Заголовки колонок для таблицы истории
 const PORTFOLIO_STATS_HEADERS = [
   'Дата/Время',
@@ -22,7 +20,7 @@ const PORTFOLIO_STATS_HEADERS = [
  * Получает или создает лист PortfolioStats
  */
 function getOrCreatePortfolioStatsSheet_() {
-  return getOrCreateSheet_(PORTFOLIO_STATS_SHEET_NAME)
+  return getOrCreateSheet_(SHEET_NAMES.PORTFOLIO_STATS)
 }
 
 /**

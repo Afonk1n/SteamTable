@@ -76,3 +76,36 @@ function getOrCreateHistorySheet_() {
   return getOrCreateSheet_(SHEET_NAMES.HISTORY)
 }
 
+/**
+ * Универсальная функция для создания и настройки листа лога
+ * @param {string} sheetName - Имя листа
+ * @param {Array<string>} headers - Массив заголовков колонок
+ * @param {Array<number>} columnWidths - Массив ширин колонок (соответствует порядку заголовков)
+ * @returns {Sheet} Созданный или существующий лист
+ */
+function createLogSheet_(sheetName, headers, columnWidths) {
+  const ss = SpreadsheetApp.getActive()
+  let sheet = ss.getSheetByName(sheetName)
+  
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName)
+    const numCols = headers.length
+    
+    // Устанавливаем заголовки
+    sheet.getRange(HEADER_ROW, 1, 1, numCols).setValues([headers])
+    
+    // Форматируем заголовок
+    formatHeaderRange_(sheet.getRange(HEADER_ROW, 1, 1, numCols))
+    
+    // Замораживаем строку заголовка
+    sheet.setFrozenRows(HEADER_ROW)
+    
+    // Устанавливаем ширины колонок
+    columnWidths.forEach((width, index) => {
+      sheet.setColumnWidth(index + 1, width)
+    })
+  }
+  
+  return sheet
+}
+

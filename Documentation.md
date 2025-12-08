@@ -20,7 +20,7 @@
 ### Файлы кода:
 
 1. **Constants.gs** - Константы и конфигурация (STEAM_FEE, COLORS, NUMBER_FORMATS, TREND_ANALYSIS_CONFIG)
-2. **SheetService.gs** - Утилиты для работы с листами (`getOrCreateSheet_`, `formatHeaderRange_`)
+2. **SheetService.gs** - Утилиты для работы с листами (`getOrCreateSheet_`, `formatHeaderRange_`, `createLogSheet_`)
 3. **History.gs** - Основная логика листа History (цены, тренды, аналитика)
 4. **Invest.gs** - Логика листа Invest (портфель инвестиций, расчет прибыли)
 5. **Sales.gs** - Логика листа Sales (проданные предметы, расчет просадки)
@@ -266,6 +266,8 @@ History (сохранение цен по датам)
 - `invest_syncTrendDaysFromHistory()` - Синхронизация Тренд/Дни из History
 - `invest_syncExtendedAnalyticsFromHistory()` - Синхронизация Фаза/Потенциал/Рекомендация из History
 - `invest_dailyReset()` - Очистка цен и пересчетов (вызывается при создании колонки периода)
+  - Очищает текущие цены и расчеты
+  - Синхронизация аналитики НЕ выполняется здесь (выполняется в `syncPricesFromHistoryToInvestAndSales()`)
 - `invest_formatTable()` - Форматирование листа Invest
 - `invest_formatGoalColumn_(startRow, endRow)` - Форматирование колонки "Цель" (красный/зеленый в зависимости от текущей цены)
 
@@ -277,6 +279,8 @@ History (сохранение цен по датам)
 - `sales_syncTrendDaysFromHistory()` - Синхронизация Тренд/Дни
 - `sales_syncExtendedAnalyticsFromHistory()` - Синхронизация Фаза/Потенциал/Рекомендация
 - `sales_dailyReset()` - Очистка цен (вызывается при создании колонки периода)
+  - Очищает текущие цены и расчеты
+  - Синхронизация аналитики НЕ выполняется здесь (выполняется в `syncPricesFromHistoryToInvestAndSales()`)
 - `sales_formatTable()` - Форматирование листа Sales
 
 ### PortfolioStats
@@ -293,15 +297,23 @@ History (сохранение цен по датам)
   - При создании новой колонки: логирует начало обновления в AutoLog, обновляет текущие цены (окраска устаревших в желтый)
 - `unified_priceUpdate()` - Продолжение сбора цен каждые 10 минут до завершения периода
 - `syncPricesFromHistoryToInvestAndSales()` - Синхронизация цен из History в Invest/Sales
-  - Вызывает `syncInvestPricesFromHistory_()` и `syncSalesPricesFromHistory_()`
+  - Читает данные History один раз через `readHistoryDataForSync_()` для оптимизации
+  - Вызывает `syncInvestPricesFromHistory_()` и `syncSalesPricesFromHistory_()` с общими данными
   - Автоматически вызывает batch-расчеты прибыли/просадки
   - Автоматически обновляет аналитику: `invest_syncMinMaxFromHistory()`, `invest_syncTrendDaysFromHistory()`, `invest_syncExtendedAnalyticsFromHistory()`, и аналогично для Sales
+- `readHistoryDataForSync_(historySheet)` - Универсальная функция для чтения данных History (оптимизация)
+- `getCurrentPriceFromHistoryData_(historyData)` - Универсальная функция для получения текущей цены из данных History
+- `isPriceOutdated_(historyData)` - Универсальная функция для определения устаревшей цены
+- `formatTableBase_(sheet, headers, columns, getSheetFn, sheetName)` - Универсальная функция для базового форматирования таблиц (FormattingService.gs)
+- `formatNewRowUniversal_(sheet, row, config, numberFormatConfig, addImageAndLink)` - Универсальная функция для форматирования новых строк (FormattingService.gs)
 - `getHistoryPriceForPeriod_(historySheet, itemName, period)` - Получение цены из History для текущего периода
 - `acquireLock_(lockKey, timeoutSeconds)` - Блокировка для предотвращения параллельного выполнения (таймаут 5 минут)
 - `releaseLock_(lockKey)` - Освобождение блокировки
 - `getCurrentPricePeriod()` - Определение текущего периода ("ночь" или "день")
-- `logAutoAction_(action, description, status)` - Логирование автоматических действий в AutoLog
-- `logOperation_(action, itemName, details)` - Логирование операций покупки/продажи в Log
+- `logAutoAction_(sheetName, action, status)` - Логирование автоматических действий в AutoLog
+- `logOperation_(type, itemName, quantity, pricePerUnit, total, source)` - Логирование операций покупки/продажи в Log
+- `insertLogRowUniversal_(sheet, values, formats)` - Универсальная функция для вставки строк в листы логов
+- `createLogSheet_(sheetName, headers, columnWidths)` - Универсальная функция для создания листов логов (в SheetService.gs)
 
 ### Telegram
 

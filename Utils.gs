@@ -288,7 +288,7 @@ function history_createPeriodAndUpdate() {
   let updateExecuted = false
   try {
     // Сохраняем lastCol до создания колонки, чтобы определить, была ли создана новая
-    const historySheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+    const historySheet = getHistorySheet_()
     const lastColBefore = historySheet ? historySheet.getLastColumn() : 0
     
     // Создаём колонку для текущего периода (с проверкой времени внутри функции)
@@ -390,6 +390,7 @@ function unified_priceUpdate() {
     // В этом случае просто выходим без ошибки
     if (historyCompleted === false) {
       console.log(`Unified: обновление цен не выполнено (колонка еще не создана или нет данных)`)
+      updateExecuted = true // Отмечаем, что обработка завершена, чтобы освободить блокировку
       return
     }
     
@@ -438,19 +439,121 @@ function unified_priceUpdate() {
   }
 }
 
+/**
+ * Читает данные из History для синхронизации цен
+ * @param {Sheet} historySheet - Лист History
+ * @returns {Object|null} Объект с данными History или null если данных нет
+ */
+function readHistoryDataForSync_(historySheet) {
+  if (!historySheet) return null
+  
+  const historyLastRow = historySheet.getLastRow()
+  const historyLastCol = historySheet.getLastColumn()
+  const historyFirstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
+  
+  if (historyLastRow <= 1 || historyLastCol < historyFirstDateCol) {
+    return null
+  }
+  
+  const historyNames = historySheet.getRange(DATA_START_ROW, 2, historyLastRow - 1, 1).getValues()
+  const historyDateCount = historyLastCol - historyFirstDateCol + 1
+  const historyDateHeaders = historySheet.getRange(HEADER_ROW, historyFirstDateCol, 1, historyDateCount).getDisplayValues()[0]
+  const historyPriceData = historySheet.getRange(DATA_START_ROW, historyFirstDateCol, historyLastRow - 1, historyDateCount).getValues()
+  
+  // Находим индекс колонки с текущим периодом
+  const period = getCurrentPricePeriod()
+  const now = new Date()
+  const todayStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd.MM.yy')
+  const periodLabel = period === PRICE_COLLECTION_PERIODS.MORNING ? 'ночь' : 'день'
+  const targetHeader = `${todayStr} ${periodLabel}`
+  
+  let currentPeriodColIndex = -1
+  for (let j = historyDateHeaders.length - 1; j >= 0; j--) {
+    if (String(historyDateHeaders[j] || '').trim() === targetHeader) {
+      currentPeriodColIndex = j
+      break
+    }
+  }
+  
+  // Создаем Map для быстрого поиска цен по имени
+  const historyPriceMap = new Map()
+  for (let h = 0; h < historyLastRow - 1; h++) {
+    const historyName = String(historyNames[h][0] || '').trim()
+    if (historyName && historyPriceData[h]) {
+      historyPriceMap.set(historyName, {
+        row: h,
+        prices: historyPriceData[h],
+        currentPeriodColIndex: currentPeriodColIndex
+      })
+    }
+  }
+  
+  return {
+    historyPriceMap,
+    currentPeriodColIndex,
+    lastRow: historyLastRow
+  }
+}
+
+/**
+ * Определяет, устарела ли цена (не за текущий период)
+ * @param {Object} historyData - Данные из historyPriceMap
+ * @returns {boolean} true если цена устарела
+ */
+function isPriceOutdated_(historyData) {
+  return historyData.currentPeriodColIndex < 0 || !historyData.prices[historyData.currentPeriodColIndex]
+}
+
+/**
+ * Получает текущую цену из данных History
+ * @param {Object} historyData - Данные из historyPriceMap
+ * @returns {number|null} Цена или null если не найдена
+ */
+function getCurrentPriceFromHistoryData_(historyData) {
+  let price = null
+  
+  // Сначала пытаемся получить цену за текущий период
+  if (historyData.currentPeriodColIndex >= 0 && historyData.prices[historyData.currentPeriodColIndex]) {
+    const value = historyData.prices[historyData.currentPeriodColIndex]
+    if (typeof value === 'number' && !isNaN(value) && value > 0) {
+      price = value
+    }
+  }
+  
+  // Если цена за текущий период отсутствует, ищем последнюю заполненную цену
+  if (price === null) {
+    for (let j = historyData.prices.length - 1; j >= 0; j--) {
+      const value = historyData.prices[j]
+      if (typeof value === 'number' && !isNaN(value) && value > 0) {
+        price = value
+        break
+      }
+    }
+  }
+  
+  return price
+}
+
 // Синхронизирует цены из History в Invest и Sales
 function syncPricesFromHistoryToInvestAndSales() {
-  const historySheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+  const historySheet = getHistorySheet_()
   if (!historySheet) {
     console.error('Sync: лист History не найден')
     return
   }
   
-    // Синхронизируем Invest
-    syncInvestPricesFromHistory_(historySheet)
-    
-    // Синхронизируем Sales
-    syncSalesPricesFromHistory_(historySheet)
+  // Читаем данные History один раз для обеих функций
+  const historyData = readHistoryDataForSync_(historySheet)
+  if (!historyData) {
+    console.log('Sync: History не содержит данных')
+    return
+  }
+  
+  // Синхронизируем Invest
+  syncInvestPricesFromHistory_(historySheet, historyData)
+  
+  // Синхронизируем Sales
+  syncSalesPricesFromHistory_(historySheet, historyData)
   
   // Обновляем аналитику в Invest/Sales после синхронизации цен
   try {
@@ -469,8 +572,8 @@ function syncPricesFromHistoryToInvestAndSales() {
 }
 
 // Синхронизирует цены для Invest из History
-function syncInvestPricesFromHistory_(historySheet) {
-  const investSheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.INVEST)
+function syncInvestPricesFromHistory_(historySheet, historyData = null) {
+  const investSheet = getInvestSheet_()
   if (!investSheet) return
   
   const lastRow = investSheet.getLastRow()
@@ -480,55 +583,20 @@ function syncInvestPricesFromHistory_(historySheet) {
   
   const nameColIndex = getColumnIndex(INVEST_COLUMNS.NAME)
   const priceColIndex = getColumnIndex(INVEST_COLUMNS.CURRENT_PRICE)
-  // статус-колонка удалена
   
   const names = investSheet.getRange(DATA_START_ROW, nameColIndex, count, 1).getValues()
   const currentPrices = investSheet.getRange(DATA_START_ROW, priceColIndex, count, 1).getValues()
-  // const statuses = investSheet.getRange(DATA_START_ROW, statusColIndex, count, 1).getValues()
   
-  // ОПТИМИЗАЦИЯ: Читаем все данные History одним batch-запросом
-  const historyLastRow = historySheet.getLastRow()
-  const historyLastCol = historySheet.getLastColumn()
-  const historyFirstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
-  
-  if (historyLastRow <= 1 || historyLastCol < historyFirstDateCol) {
-    console.log('Sync Invest: History не содержит данных')
-    return
-  }
-  
-  const historyNames = historySheet.getRange(DATA_START_ROW, 2, historyLastRow - 1, 1).getValues()
-  const historyDateCount = historyLastCol - historyFirstDateCol + 1
-  const historyDateHeaders = historySheet.getRange(HEADER_ROW, historyFirstDateCol, 1, historyDateCount).getDisplayValues()[0]
-  const historyPriceData = historySheet.getRange(DATA_START_ROW, historyFirstDateCol, historyLastRow - 1, historyDateCount).getValues()
-  
-  // Находим индекс колонки с текущим периодом
-  const period = getCurrentPricePeriod()
-  const now = new Date()
-  const todayStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd.MM.yy')
-  const periodLabel = period === PRICE_COLLECTION_PERIODS.MORNING ? 'ночь' : 'день'
-  const targetHeader = `${todayStr} ${periodLabel}`
-  
-  let currentPeriodColIndex = -1
-  for (let j = historyDateHeaders.length - 1; j >= 0; j--) {
-    if (String(historyDateHeaders[j] || '').trim() === targetHeader) {
-      currentPeriodColIndex = j
-      break
+  // Если данные History не переданы, читаем их
+  if (!historyData) {
+    historyData = readHistoryDataForSync_(historySheet)
+    if (!historyData) {
+      console.log('Sync Invest: History не содержит данных')
+      return
     }
   }
   
-  // Создаем Map для быстрого поиска цен по имени
-  const historyPriceMap = new Map()
-  for (let h = 0; h < historyLastRow - 1; h++) {
-    const historyName = String(historyNames[h][0] || '').trim()
-    if (historyName && historyPriceData[h]) {
-      historyPriceMap.set(historyName, {
-        row: h,
-        prices: historyPriceData[h],
-        currentPeriodColIndex: currentPeriodColIndex
-      })
-    }
-  }
-  
+  const { historyPriceMap } = historyData
   const backgroundsToSet = [] // Массив для batch-применения фонов
   
   let updatedCount = 0
@@ -538,39 +606,21 @@ function syncInvestPricesFromHistory_(historySheet) {
     const name = String(names[i][0] || '').trim()
     if (!name) continue
     
-    const historyData = historyPriceMap.get(name)
-    if (!historyData) {
+    const itemHistoryData = historyPriceMap.get(name)
+    if (!itemHistoryData) {
       currentPrices[i][0] = null
       errorCount++
       continue
     }
     
-    // Получаем цену из уже прочитанных данных
-    let price = null
-    if (historyData.currentPeriodColIndex >= 0 && historyData.prices[historyData.currentPeriodColIndex]) {
-      const value = historyData.prices[historyData.currentPeriodColIndex]
-      if (typeof value === 'number' && !isNaN(value) && value > 0) {
-        price = value
-      }
-    }
-    
-    // Если цена за текущий период отсутствует, ищем последнюю заполненную цену
-    if (price === null) {
-      for (let j = historyData.prices.length - 1; j >= 0; j--) {
-        const value = historyData.prices[j]
-        if (typeof value === 'number' && !isNaN(value) && value > 0) {
-          price = value
-          break
-        }
-      }
-    }
-    
+    // Получаем цену используя универсальную функцию
+    const price = getCurrentPriceFromHistoryData_(itemHistoryData)
     currentPrices[i][0] = price
     updatedCount++
     
     const row = i + DATA_START_ROW
-    // Определяем, устарела ли цена (не за текущий период)
-    const isOutdated = historyData.currentPeriodColIndex < 0 || !historyData.prices[historyData.currentPeriodColIndex]
+    // Определяем, устарела ли цена используя универсальную функцию
+    const isOutdated = isPriceOutdated_(itemHistoryData)
     backgroundsToSet.push({ row, col: priceColIndex, color: isOutdated ? COLORS.STABLE : null })
   }
   
@@ -580,7 +630,6 @@ function syncInvestPricesFromHistory_(historySheet) {
   })
   
   investSheet.getRange(DATA_START_ROW, priceColIndex, count, 1).setValues(currentPrices)
-  // статусов больше нет
   
   invest_calculateBatch_(investSheet, currentPrices)
   
@@ -588,8 +637,8 @@ function syncInvestPricesFromHistory_(historySheet) {
 }
 
 // Синхронизирует цены для Sales из History
-function syncSalesPricesFromHistory_(historySheet) {
-  const salesSheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.SALES)
+function syncSalesPricesFromHistory_(historySheet, historyData = null) {
+  const salesSheet = getSalesSheet_()
   if (!salesSheet) return
   
   const lastRow = salesSheet.getLastRow()
@@ -599,59 +648,22 @@ function syncSalesPricesFromHistory_(historySheet) {
   
   const nameColIndex = getColumnIndex(SALES_COLUMNS.NAME)
   const priceColIndex = getColumnIndex(SALES_COLUMNS.CURRENT_PRICE)
-  const dropColIndex = getColumnIndex(SALES_COLUMNS.PRICE_DROP)
-  // статус-колонка удалена
   const sellColIndex = getColumnIndex(SALES_COLUMNS.SELL_PRICE)
   
   const names = salesSheet.getRange(DATA_START_ROW, nameColIndex, count, 1).getValues()
   const currentPrices = salesSheet.getRange(DATA_START_ROW, priceColIndex, count, 1).getValues()
-  const priceDrops = salesSheet.getRange(DATA_START_ROW, dropColIndex, count, 1).getValues()
-  // const statuses = salesSheet.getRange(DATA_START_ROW, statusColIndex, count, 1).getValues()
   const sellPrices = salesSheet.getRange(DATA_START_ROW, sellColIndex, count, 1).getValues()
   
-  // ОПТИМИЗАЦИЯ: Читаем все данные History одним batch-запросом (используем те же данные, что и для Invest)
-  const historyLastRow = historySheet.getLastRow()
-  const historyLastCol = historySheet.getLastColumn()
-  const historyFirstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
-  
-  if (historyLastRow <= 1 || historyLastCol < historyFirstDateCol) {
-    console.log('Sync Sales: History не содержит данных')
-    return
-  }
-  
-  const historyNames = historySheet.getRange(DATA_START_ROW, 2, historyLastRow - 1, 1).getValues()
-  const historyDateCount = historyLastCol - historyFirstDateCol + 1
-  const historyDateHeaders = historySheet.getRange(HEADER_ROW, historyFirstDateCol, 1, historyDateCount).getDisplayValues()[0]
-  const historyPriceData = historySheet.getRange(DATA_START_ROW, historyFirstDateCol, historyLastRow - 1, historyDateCount).getValues()
-  
-  // Находим индекс колонки с текущим периодом
-  const period = getCurrentPricePeriod()
-  const now = new Date()
-  const todayStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd.MM.yy')
-  const periodLabel = period === PRICE_COLLECTION_PERIODS.MORNING ? 'ночь' : 'день'
-  const targetHeader = `${todayStr} ${periodLabel}`
-  
-  let currentPeriodColIndex = -1
-  for (let j = historyDateHeaders.length - 1; j >= 0; j--) {
-    if (String(historyDateHeaders[j] || '').trim() === targetHeader) {
-      currentPeriodColIndex = j
-      break
+  // Если данные History не переданы, читаем их
+  if (!historyData) {
+    historyData = readHistoryDataForSync_(historySheet)
+    if (!historyData) {
+      console.log('Sync Sales: History не содержит данных')
+      return
     }
   }
   
-  // Создаем Map для быстрого поиска цен по имени
-  const historyPriceMap = new Map()
-  for (let h = 0; h < historyLastRow - 1; h++) {
-    const historyName = String(historyNames[h][0] || '').trim()
-    if (historyName && historyPriceData[h]) {
-      historyPriceMap.set(historyName, {
-        row: h,
-        prices: historyPriceData[h],
-        currentPeriodColIndex: currentPeriodColIndex
-      })
-    }
-  }
-  
+  const { historyPriceMap } = historyData
   const backgroundsToSet = [] // Массив для batch-применения фонов
   
   let updatedCount = 0
@@ -661,47 +673,21 @@ function syncSalesPricesFromHistory_(historySheet) {
     const name = String(names[i][0] || '').trim()
     if (!name) continue
     
-    const historyData = historyPriceMap.get(name)
-    if (!historyData) {
+    const itemHistoryData = historyPriceMap.get(name)
+    if (!itemHistoryData) {
       currentPrices[i][0] = null
       errorCount++
       continue
     }
     
-    // Получаем цену из уже прочитанных данных
-    let price = null
-    if (historyData.currentPeriodColIndex >= 0 && historyData.prices[historyData.currentPeriodColIndex]) {
-      const value = historyData.prices[historyData.currentPeriodColIndex]
-      if (typeof value === 'number' && !isNaN(value) && value > 0) {
-        price = value
-      }
-    }
-    
-    // Если цена за текущий период отсутствует, ищем последнюю заполненную цену
-    if (price === null) {
-      for (let j = historyData.prices.length - 1; j >= 0; j--) {
-        const value = historyData.prices[j]
-        if (typeof value === 'number' && !isNaN(value) && value > 0) {
-          price = value
-          break
-        }
-      }
-    }
-    
+    // Получаем цену используя универсальную функцию
+    const price = getCurrentPriceFromHistoryData_(itemHistoryData)
     currentPrices[i][0] = price
-    
-    const sellPrice = Number(sellPrices[i][0])
-    if (Number.isFinite(sellPrice) && sellPrice > 0 && price !== null && price > 0) {
-      priceDrops[i][0] = (sellPrice - price) / sellPrice
-    } else {
-      priceDrops[i][0] = null
-    }
-    
     updatedCount++
     
     const row = i + DATA_START_ROW
-    // Определяем, устарела ли цена (не за текущий период)
-    const isOutdated = historyData.currentPeriodColIndex < 0 || !historyData.prices[historyData.currentPeriodColIndex]
+    // Определяем, устарела ли цена используя универсальную функцию
+    const isOutdated = isPriceOutdated_(itemHistoryData)
     backgroundsToSet.push({ row, col: priceColIndex, color: isOutdated ? COLORS.STABLE : null })
   }
   
@@ -711,8 +697,9 @@ function syncSalesPricesFromHistory_(historySheet) {
   })
   
   salesSheet.getRange(DATA_START_ROW, priceColIndex, count, 1).setValues(currentPrices)
-  salesSheet.getRange(DATA_START_ROW, dropColIndex, count, 1).setValues(priceDrops)
-  // статусов больше нет
+  
+  // ИСПРАВЛЕНИЕ: Используем sales_calculateBatch_() вместо ручного расчета priceDrop для консистентности
+  sales_calculateBatch_(salesSheet, currentPrices, sellPrices)
   
   console.log(`Sync Sales: обновлено ${updatedCount}, ошибок ${errorCount}`)
 }
@@ -893,85 +880,75 @@ function findRowByName_(sheet, name, nameColIndex) {
 }
 
 function getOrCreateAutoLogSheet_() {
-  const ss = SpreadsheetApp.getActive()
-  let sheet = ss.getSheetByName(SHEET_NAMES.AUTO_LOG)
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEET_NAMES.AUTO_LOG)
-    sheet.getRange(1, 1, 1, 4).setValues([
-      ['Дата/время', 'Лист', 'Действие', 'Статус']
-    ])
-    sheet.setFrozenRows(HEADER_ROW)
-    // Формат шапки
-    formatHeaderRange_(sheet.getRange(1, 1, 1, 4))
-    // Ширины
-    sheet.setColumnWidth(1, 150) // Дата/время
-    sheet.setColumnWidth(2, 100) // Лист
-    sheet.setColumnWidth(3, 200) // Действие
-    sheet.setColumnWidth(4, 100) // Статус
+  return createLogSheet_(
+    SHEET_NAMES.AUTO_LOG,
+    ['Дата/время', 'Лист', 'Действие', 'Статус'],
+    [150, 100, 200, 100] // Дата/время, Лист, Действие, Статус
+  )
+}
+
+/**
+ * Универсальная функция для вставки новой строки в лист лога
+ * @param {Sheet} sheet - Лист для вставки
+ * @param {Array} values - Массив значений для вставки
+ * @param {Object} formats - Объект с форматами {dateFormat: string, alignments: {horizontal: string, vertical: string}}
+ */
+function insertLogRowUniversal_(sheet, values, formats = {}) {
+  // Вставляем новую строку сразу после заголовка (строка 2)
+  // Существующие строки автоматически сдвигаются вниз
+  const insertRow = HEADER_ROW + 1
+  sheet.insertRowAfter(HEADER_ROW)
+  
+  // Сбрасываем форматирование заголовка для новой строки
+  // После insertRowAfter новая строка может наследовать форматирование заголовка
+  const numCols = values.length
+  const newRowRange = sheet.getRange(insertRow, 1, 1, numCols)
+  newRowRange.setBackground(null) // Сбрасываем фон
+  newRowRange.setFontWeight('normal') // Сбрасываем жирный шрифт
+  
+  // Устанавливаем значения
+  sheet.getRange(insertRow, 1, 1, numCols).setValues([values])
+  
+  // Применяем форматы
+  if (formats.dateFormat) {
+    sheet.getRange(insertRow, 1).setNumberFormat(formats.dateFormat)
   }
-  return sheet
+  
+  const horizontalAlign = formats.alignments?.horizontal || 'center'
+  const verticalAlign = formats.alignments?.vertical || 'middle'
+  sheet.getRange(insertRow, 1, 1, numCols).setVerticalAlignment(verticalAlign).setHorizontalAlignment(horizontalAlign)
 }
 
 function logAutoAction_(sheetName, action, status = 'OK') {
   const sheet = getOrCreateAutoLogSheet_()
-  // Вставляем новую строку сразу после заголовка (строка 2)
-  // Существующие строки автоматически сдвигаются вниз
-  const insertRow = HEADER_ROW + 1
-  sheet.insertRowAfter(HEADER_ROW)
   const now = new Date()
   
-  // ИСПРАВЛЕНИЕ: Сбрасываем форматирование заголовка для новой строки
-  // После insertRowAfter новая строка может наследовать форматирование заголовка
-  const newRowRange = sheet.getRange(insertRow, 1, 1, 4)
-  newRowRange.setBackground(null) // Сбрасываем фон
-  newRowRange.setFontWeight('normal') // Сбрасываем жирный шрифт
-  
-  sheet.getRange(insertRow, 1, 1, 4).setValues([[now, sheetName, action, status]])
-  sheet.getRange(insertRow, 1).setNumberFormat('dd.MM.yyyy HH:mm')
-  sheet.getRange(insertRow, 1, 1, 4).setVerticalAlignment('middle').setHorizontalAlignment('center')
+  insertLogRowUniversal_(sheet, [now, sheetName, action, status], {
+    dateFormat: 'dd.MM.yyyy HH:mm',
+    alignments: { horizontal: 'center', vertical: 'middle' }
+  })
 }
 
 
 function getOrCreateLogSheet_() {
-  const ss = SpreadsheetApp.getActive()
-  let sheet = ss.getSheetByName(SHEET_NAMES.LOG)
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEET_NAMES.LOG)
-    sheet.getRange(1, 1, 1, 8).setValues([
-      ['Дата/время', 'Тип', 'Изображение', 'Предмет', 'Кол-во', 'Цена за шт', 'Сумма', 'Источник']
-    ])
-    sheet.setFrozenRows(HEADER_ROW)
-    // Формат шапки
-    formatHeaderRange_(sheet.getRange(1, 1, 1, 8))
-    // Ширины и формат чисел
-    sheet.setColumnWidth(1, 150)
-    sheet.setColumnWidth(2, 90)
-    sheet.setColumnWidth(3, 120) // Изображение (покрупнее)
-    sheet.setColumnWidth(4, 250)
-    sheet.setColumnWidth(5, 90)
-    sheet.setColumnWidth(6, 120)
-    sheet.setColumnWidth(7, 120)
-    sheet.setColumnWidth(8, 120)
-  }
-  return sheet
+  return createLogSheet_(
+    SHEET_NAMES.LOG,
+    ['Дата/время', 'Тип', 'Изображение', 'Предмет', 'Кол-во', 'Цена за шт', 'Сумма', 'Источник'],
+    [150, 90, 120, 250, 90, 120, 120, 120] // Дата/время, Тип, Изображение, Предмет, Кол-во, Цена за шт, Сумма, Источник
+  )
 }
 
 function logOperation_(type, itemName, quantity, pricePerUnit, total, source) {
   const sheet = getOrCreateLogSheet_()
-  // Вставляем новую строку сразу после заголовка (строка 2)
-  // Существующие строки автоматически сдвигаются вниз
-  const insertRow = HEADER_ROW + 1
-  sheet.insertRowAfter(HEADER_ROW)
   const now = new Date()
-  
-  // ИСПРАВЛЕНИЕ: Сбрасываем форматирование заголовка для новой строки
-  // После insertRowAfter новая строка может наследовать форматирование заголовка
-  const newRowRange = sheet.getRange(insertRow, 1, 1, 8)
-  newRowRange.setBackground(null) // Сбрасываем фон
-  newRowRange.setFontWeight('normal') // Сбрасываем жирный шрифт
+  const insertRow = HEADER_ROW + 1
   
   // Порядок колонок: A Дата, B Тип, C Изображение, D Предмет, E Кол-во, F Цена за шт, G Сумма, H Источник
-  sheet.getRange(insertRow, 1, 1, 2).setValues([[now, type]])
+  // Используем универсальную функцию для базовой вставки (изображение будет null, заполним потом)
+  insertLogRowUniversal_(sheet, [now, type, null, itemName, quantity, pricePerUnit, total, source], {
+    dateFormat: 'dd.MM.yyyy HH:mm',
+    alignments: { horizontal: 'center', vertical: 'middle' }
+  })
   
   // Используем тот же механизм изображений, что и в других листах
   const logConfig = {
@@ -981,16 +958,11 @@ function logOperation_(type, itemName, quantity, pricePerUnit, total, source) {
   }
   setImageAndLink_(sheet, insertRow, 570, itemName, logConfig)
   
-  sheet.getRange(insertRow, 4, 1, 4).setValues([[itemName, quantity, pricePerUnit, total]])
-  sheet.getRange(insertRow, 8).setValue(source)
-  
-  // Форматы и выравнивания
-  sheet.getRange(insertRow, 1).setNumberFormat('dd.MM.yyyy HH:mm')
-  sheet.getRange(insertRow, 1, 1, 8).setVerticalAlignment('middle').setHorizontalAlignment('center')
-  sheet.getRange(insertRow, 4).setHorizontalAlignment('left')
-  sheet.getRange(insertRow, 5).setNumberFormat('0')
-  sheet.getRange(insertRow, 6).setNumberFormat('#,##0.00 ₽')
-  sheet.getRange(insertRow, 7).setNumberFormat('#,##0.00 ₽')
+  // Дополнительное форматирование для специфичных колонок
+  sheet.getRange(insertRow, 4).setHorizontalAlignment('left') // Предмет - выравнивание влево
+  sheet.getRange(insertRow, 5).setNumberFormat('0') // Кол-во - целое число
+  sheet.getRange(insertRow, 6).setNumberFormat('#,##0.00 ₽') // Цена за шт
+  sheet.getRange(insertRow, 7).setNumberFormat('#,##0.00 ₽') // Сумма
   
   // Устанавливаем высоту строки для изображения
   sheet.setRowHeight(insertRow, 85)
@@ -1100,7 +1072,7 @@ function syncMinMaxFromHistoryUniversal_(targetSheet, minColIndex, maxColIndex, 
   const lastRow = targetSheet.getLastRow()
   if (lastRow <= 1) return { updatedCount: 0 }
 
-  const history = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+  const history = getHistorySheet_()
   if (!history) return { updatedCount: 0 }
 
   const count = lastRow - 1
@@ -1201,7 +1173,7 @@ function syncTrendFromHistoryUniversal_(targetSheet, trendColIndex, updateAll) {
   const lastRow = targetSheet.getLastRow()
   if (lastRow <= 1) return { updatedCount: 0 }
 
-  const history = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+  const history = getHistorySheet_()
   if (!history) return { updatedCount: 0 }
 
   const count = lastRow - 1
@@ -1282,7 +1254,7 @@ function syncExtendedAnalyticsFromHistoryUniversal_(targetSheet, phaseColIndex, 
   const lastRow = targetSheet.getLastRow()
   if (lastRow <= 1) return { updatedCount: 0 }
 
-  const history = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+  const history = getHistorySheet_()
   if (!history) return { updatedCount: 0 }
 
   const count = lastRow - 1

@@ -6,37 +6,22 @@ const INVEST_CONFIG = {
   COLUMNS: INVEST_COLUMNS,
 }
 
-const INVEST_SHEET_NAME = SHEET_NAMES.INVEST
-
 // Форматирование новой строки Invest (при добавлении из History)
 function invest_formatNewRow_(sheet, row) {
-  if (row <= HEADER_ROW) return
-  const name = sheet.getRange(`B${row}`).getValue()
-  if (!name) return
+  const numberFormatConfig = {
+    QUANTITY: NUMBER_FORMATS.INTEGER,      // C: Количество
+    BUY_PRICE: NUMBER_FORMATS.CURRENCY,    // D: Цена покупки
+    CURRENT_PRICE: NUMBER_FORMATS.CURRENCY, // E: Текущая цена
+    GOAL: NUMBER_FORMATS.CURRENCY,         // F: Цель
+    TOTAL_INVESTMENT: NUMBER_FORMATS.CURRENCY, // G: Общие вложения
+    CURRENT_VALUE_AFTER_FEE: NUMBER_FORMATS.CURRENCY, // H: Текущая стоимость с комиссией
+    PROFIT: NUMBER_FORMATS.CURRENCY,       // I: Профит
+    PROFIT_AFTER_FEE: NUMBER_FORMATS.PERCENT, // J: Прибыль % с комиссией
+    MIN_PRICE: NUMBER_FORMATS.CURRENCY,    // L: Min цена
+    MAX_PRICE: NUMBER_FORMATS.CURRENCY     // M: Max цена
+  }
   
-  // Базовое форматирование строки (A-R = 18 колонок после удаления H, K и DAYS_CHANGE)
-  const numCols = getColumnIndex(INVEST_COLUMNS.RECOMMENDATION)
-  sheet.getRange(row, 1, 1, numCols).setVerticalAlignment('middle').setHorizontalAlignment('center')
-  sheet.getRange(`B${row}`).setHorizontalAlignment('left')
-  
-  // Форматы чисел (используем константы)
-  // УДАЛЕНЫ: H (Текущая стоимость без комиссии), K (Прибыль % без комиссии)
-  sheet.getRange(`C${row}`).setNumberFormat(NUMBER_FORMATS.INTEGER) // Количество
-  sheet.getRange(`D${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цена покупки
-  sheet.getRange(`E${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Текущая цена
-  sheet.getRange(`F${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цель
-  sheet.getRange(`G${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Общие вложения
-  sheet.getRange(`H${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Текущая стоимость с комиссией (было I)
-  sheet.getRange(`I${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Профит (было J)
-  sheet.getRange(`J${row}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль % с комиссией (было L)
-  sheet.getRange(`L${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min цена (было N)
-  sheet.getRange(`M${row}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Max цена (было O)
-  // O: Фаза (было R, убрали DAYS_CHANGE)
-  // P: Потенциал (было S)
-  // Q: Рекомендация (было T)
-  
-  // Устанавливаем высоту строки
-  sheet.setRowHeight(row, ROW_HEIGHT)
+  formatNewRowUniversal_(sheet, row, INVEST_CONFIG, numberFormatConfig, false)
 }
 
 // Функции getInvestSheet_ и getOrCreateInvestSheet_ перенесены в SheetService.gs
@@ -46,7 +31,19 @@ function invest_applySale(row, qtySold, sellPricePerUnit) {
   if (!sheet) return
   const name = sheet.getRange(`${INVEST_CONFIG.COLUMNS.NAME}${row}`).getValue()
   const qtyAvailable = Number(sheet.getRange(`${INVEST_CONFIG.COLUMNS.QUANTITY}${row}`).getValue())
-  if (!name || !Number.isFinite(qtyAvailable) || qtyAvailable <= 0) return
+  
+  // Проверка валидности данных
+  if (!name || !Number.isFinite(qtyAvailable) || qtyAvailable <= 0) {
+    console.error('Invest: некорректные данные для продажи в строке', row)
+    return
+  }
+  
+  // Проверка, что продаваемое количество не превышает доступное
+  if (!Number.isFinite(qtySold) || qtySold <= 0 || qtySold > qtyAvailable) {
+    console.error(`Invest: некорректное количество для продажи: ${qtySold} (доступно: ${qtyAvailable})`)
+    SpreadsheetApp.getUi().alert(`Ошибка: нельзя продать ${qtySold} шт., доступно только ${qtyAvailable} шт.`)
+    return
+  }
 
   const remaining = qtyAvailable - qtySold
   if (remaining > 0) {
@@ -54,6 +51,7 @@ function invest_applySale(row, qtySold, sellPricePerUnit) {
     const currentPrice = Number(sheet.getRange(`${INVEST_CONFIG.COLUMNS.CURRENT_PRICE}${row}`).getValue()) || 0
     invest_calculateSingle_(sheet, row, currentPrice)
   } else {
+    // remaining === 0 - удаляем строку
     sheet.deleteRow(row)
   }
 
@@ -65,7 +63,7 @@ function invest_applySale(row, qtySold, sellPricePerUnit) {
   }
 
   // Синхронизация с Sales - используем максимальную цену продажи
-  const sales = SpreadsheetApp.getActive().getSheetByName('Sales') || null
+  const sales = getSalesSheet_()
   if (sales) {
     const sRow = findRowByName_(sales, name, getColumnIndex(SALES_COLUMNS.NAME))
     const currentSell = sRow > 1 ? Number(sales.getRange(sRow, getColumnIndex(SALES_COLUMNS.SELL_PRICE)).getValue()) : null
@@ -84,7 +82,7 @@ function invest_applySale(row, qtySold, sellPricePerUnit) {
       // Полное форматирование новой строки Sales
       sales_formatNewRow_(sales, target)
       
-      const historySheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+      const historySheet = getHistorySheet_()
       if (historySheet) {
         const period = getCurrentPricePeriod()
         const priceResult = getHistoryPriceForPeriod_(historySheet, name, period)
@@ -131,9 +129,8 @@ function invest_dailyReset() {
 
   invest_formatGoalColumn_(DATA_START_ROW, lastRow)
 
-  invest_syncMinMaxFromHistory()
-  invest_syncTrendDaysFromHistory()
-  invest_syncExtendedAnalyticsFromHistory()
+  // ИСПРАВЛЕНИЕ: Синхронизация аналитики убрана отсюда, так как она выполняется в syncPricesFromHistoryToInvestAndSales()
+  // Это предотвращает двойную синхронизацию аналитики
   
   // Примечание: История портфеля теперь сохраняется автоматически в unified_priceUpdate() после дневного сбора
 
@@ -147,7 +144,7 @@ function invest_dailyReset() {
 function invest_updateSinglePrice(row) {
   const sheet = getInvestSheet_()
   if (!sheet) return 'error'
-  const historySheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+  const historySheet = getHistorySheet_()
   if (!historySheet) return 'error'
   
   const itemName = sheet.getRange(`${INVEST_CONFIG.COLUMNS.NAME}${row}`).getValue()
@@ -248,7 +245,7 @@ function invest_addOrUpdatePosition_(name, qtyToAdd, buyPricePerUnit) {
     
     // Пытаемся получить текущую цену из History
     let currentPrice = 0
-    const historySheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAMES.HISTORY)
+    const historySheet = getHistorySheet_()
     if (historySheet) {
       const period = getCurrentPricePeriod()
       const priceResult = getHistoryPriceForPeriod_(historySheet, name, period)
@@ -272,10 +269,25 @@ function invest_addOrUpdatePosition_(name, qtyToAdd, buyPricePerUnit) {
   // есть позиция — усредняем цену покупки
   const quantityCol = getColumnIndex(INVEST_COLUMNS.QUANTITY)
   const buyPriceCol = getColumnIndex(INVEST_COLUMNS.BUY_PRICE)
-  const currentQty = Number(sheet.getRange(row, quantityCol).getValue()) || 0
-  const currentBuy = Number(sheet.getRange(row, buyPriceCol).getValue()) || 0
+  let currentQty = Number(sheet.getRange(row, quantityCol).getValue()) || 0
+  let currentBuy = Number(sheet.getRange(row, buyPriceCol).getValue()) || 0
+  
+  // Проверка валидности данных
+  if (!Number.isFinite(currentQty) || currentQty < 0) {
+    console.error('Invest: некорректное текущее количество в строке', row)
+    currentQty = 0 // Исправляем на 0
+  }
+  if (!Number.isFinite(currentBuy) || currentBuy < 0) {
+    console.error('Invest: некорректная текущая цена покупки в строке', row)
+    currentBuy = 0 // Исправляем на 0
+  }
+  
   const newQty = currentQty + qtyToAdd
-  const newAvg = newQty > 0 ? (currentQty * currentBuy + qtyToAdd * buyPricePerUnit) / newQty : buyPricePerUnit
+  
+  // Усредняем цену: если newQty > 0, используем формулу усреднения, иначе используем новую цену
+  const newAvg = newQty > 0 && Number.isFinite(currentBuy) && currentBuy > 0
+    ? (currentQty * currentBuy + qtyToAdd * buyPricePerUnit) / newQty
+    : buyPricePerUnit
   sheet.getRange(row, quantityCol).setValue(newQty)
   sheet.getRange(row, buyPriceCol).setValue(newAvg)
   const currentPriceCol = getColumnIndex(INVEST_COLUMNS.CURRENT_PRICE)
@@ -285,24 +297,11 @@ function invest_addOrUpdatePosition_(name, qtyToAdd, buyPricePerUnit) {
 
 function invest_formatTable() {
   const sheet = getOrCreateInvestSheet_()
-  const lastRow = sheet.getLastRow()
-
-  // Используем константы для заголовков
   const headers = HEADERS.INVEST // 18 колонок (убрали H, K и DAYS_CHANGE)
-
-  sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
   
-  // Проверяем и исправляем заголовок "Потенциал" на "Потенциал (P85)" если нужно
-  const potentialColIndex = getColumnIndex(INVEST_COLUMNS.POTENTIAL)
-  const currentPotentialHeader = sheet.getRange(HEADER_ROW, potentialColIndex).getValue()
-  if (currentPotentialHeader && currentPotentialHeader !== 'Потенциал (P85)') {
-    sheet.getRange(HEADER_ROW, potentialColIndex).setValue('Потенциал (P85)')
-  }
-
-  formatHeaderRange_(sheet.getRange(HEADER_ROW, 1, 1, headers.length))
-
-  sheet.setRowHeight(HEADER_ROW, HEADER_HEIGHT)
-  if (lastRow > 1) sheet.setRowHeights(DATA_START_ROW, lastRow - 1, ROW_HEIGHT)
+  // Базовое форматирование таблицы
+  const lastRow = formatTableBase_(sheet, headers, INVEST_COLUMNS, getInvestSheet_, 'Invest')
+  if (lastRow === 0) return
 
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.IMAGE), COLUMN_WIDTHS.IMAGE)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.NAME), COLUMN_WIDTHS.NAME)
@@ -349,7 +348,7 @@ function invest_formatTable() {
     sheet.setConditionalFormatRules([])
   }
 
-  sheet.setFrozenRows(HEADER_ROW)
+  // Заморозка строки уже выполнена в formatTableBase_()
   // Добавляем колонку кнопки «Продать» если отсутствует
   const lastCol = sheet.getLastColumn()
   const sellHeader = 'Продать'
