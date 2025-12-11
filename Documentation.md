@@ -19,18 +19,23 @@
 
 ### Файлы кода:
 
-1. **Constants.gs** - Константы и конфигурация (STEAM_FEE, COLORS, NUMBER_FORMATS, TREND_ANALYSIS_CONFIG)
-2. **SheetService.gs** - Утилиты для работы с листами (`getOrCreateSheet_`, `formatHeaderRange_`, `createLogSheet_`)
+1. **Constants.gs** - Константы и конфигурация (STEAM_FEE, COLORS, NUMBER_FORMATS, TREND_ANALYSIS_CONFIG, API_CONFIG, HERO_STATS, HERO_MAPPING)
+2. **SheetService.gs** - Утилиты для работы с листами (`getOrCreateSheet_`, `formatHeaderRange_`, `createLogSheet_`, `getHeroStatsSheet_`, `getHeroMappingSheet_`)
 3. **History.gs** - Основная логика листа History (цены, тренды, аналитика)
 4. **Invest.gs** - Логика листа Invest (портфель инвестиций, расчет прибыли)
 5. **Sales.gs** - Логика листа Sales (проданные предметы, расчет просадки)
 6. **Utils.gs** - Унифицированная система обновления цен, синхронизация, блокировки
-7. **Menu.gs** - Меню и триггеры (onOpen, setupAllTriggers)
+7. **Menu.gs** - Меню и триггеры (onOpen, setupAllTriggers, performInitialSetup)
 8. **EventHandler.gs** - Обработка событий листов (чекбоксы "Купить?" и "Продать?")
-9. **FormattingService.gs** - Утилиты форматирования
+9. **FormattingService.gs** - Утилиты форматирования (универсальные функции для всех таблиц)
 10. **Calculations.gs** - Batch-расчеты прибыли/убытка для Invest/Sales
 11. **PortfolioStats.gs** - Трекинг истории портфеля (сохранение метрик)
 12. **Telegram.gs** - Интеграция с Telegram Bot API (уведомления, отчеты)
+13. **OpenDotaAPI.gs** - Интеграция с OpenDota API для статистики героев (пикрейт, винрейт, банрейт)
+14. **SteamWebAPI.gs** - Интеграция с SteamWebAPI.ru для получения данных о предметах (цены, теги, изображения)
+15. **HeroStats.gs** - Управление листом HeroStats (статистика героев по датам)
+16. **HeroMapping.gs** - Управление листом HeroMapping (связь предметов с героями)
+17. **PriceHistoryUtils.gs** - Утилиты для расчета Min/Max цен через SteamWebAPI.ru
 
 ### Листы таблицы:
 
@@ -38,6 +43,8 @@
 - **Invest** - Портфель активных инвестиций
 - **Sales** - Проданные предметы (отслеживание просадки цены)
 - **PortfolioStats** - История метрик портфеля (динамика во времени)
+- **HeroStats** - Статистика героев по датам (пикрейт, винрейт, банрейт, contest rate)
+- **HeroMapping** - Маппинг предметов на героев (с изображениями и автоопределением)
 - **AutoLog** - Лог автоматических действий скрипта
 - **Log** - Лог операций покупки/продажи
 
@@ -228,6 +235,38 @@ History (сохранение цен по датам)
 - Сохранение происходит автоматически 1 раз в сутки после завершения периода "день"
 - Есть ручная функция для тестирования (`portfolioStats_saveHistoryManual()`)
 
+### HeroStats (статистика героев)
+
+**Фиксированные колонки (A-C):**
+- **A**: Hero ID (число, уникальный идентификатор героя)
+- **B**: Hero Name (текст, имя героя)
+- **C**: Rank Category (текст: "High Rank" / "All Ranks")
+
+**Динамические колонки (D+):**
+- Заголовок: `"DD.MM.YY HH:MM"` (дата и время обновления)
+- Данные: JSON строка с статистикой `{pickRate, winRate, banRate, contestRate, matchCount}`
+
+**Особенности**:
+- Две строки для каждого героя: одна для "High Rank", вторая для "All Ranks"
+- Данные хранятся в JSON формате для компактности
+- Автоматическое архивирование данных старше 90 дней
+
+### HeroMapping (маппинг предметов на героев)
+
+- **A**: Item Name (текст, название предмета из History)
+- **B**: Image (изображение предмета, формула `=IMAGE(url)`, автоматически заполняется при автоопределении)
+- **C**: Hero Name (текст, имя героя, определяется автоматически через SteamWebAPI.ru)
+- **D**: Hero ID (число, идентификатор героя)
+- **E**: Auto-detected (чекбокс, автоматически определено)
+- **F**: Category (текст: "Hero Item" / "Common Item")
+
+**Особенности**:
+- Автоматическое определение героев через SteamWebAPI.ru (tag5)
+- Fallback на `/api/item_by_nameid` для предметов, не найденных через основной endpoint
+- Batch операции для быстрой обработки
+- Синхронизация с History (добавляет только новые предметы)
+- Полностью автономная система без ручной верификации (верификация убрана для упрощения)
+
 ---
 
 ## ВАЖНЫЕ ФУНКЦИИ И ИХ НАЗНАЧЕНИЕ
@@ -293,6 +332,9 @@ History (сохранение цен по датам)
 
 ### Utils
 
+- `fetchWithRetry_(url, options, config)` - Универсальная функция для выполнения HTTP запросов с retry логикой (используется в SteamWebAPI и OpenDotaAPI)
+  - Поддерживает экспоненциальную задержку при rate limit (429)
+  - Использует константы HTTP_STATUS и LIMITS для магических чисел
 - `history_createPeriodAndUpdate()` - Создание колонки периода и обновление цен (вызывается триггерами в 00:00 и 12:00)
   - При создании новой колонки: логирует начало обновления в AutoLog, обновляет текущие цены (окраска устаревших в желтый)
 - `unified_priceUpdate()` - Продолжение сбора цен каждые 10 минут до завершения периода
@@ -372,6 +414,11 @@ COLORS = {
   BACKGROUND: '#f3f3f3'   // Серый для заголовков
 }
 
+HTTP_STATUS = {
+  OK: 200,
+  RATE_LIMIT: 429
+}
+
 UPDATE_INTERVALS = {
   PRICES_MINUTES: 10,     // Каждые 10 минут продолжение сбора
   MORNING_HOUR: 0,        // 00:00 (начало периода "ночь")
@@ -382,6 +429,37 @@ PRICE_COLLECTION_PERIODS = {
   MORNING: 'morning',     // Период "ночь" (00:10-12:00)
   EVENING: 'evening'      // Период "день" (12:00-00:10)
 }
+
+LIMITS = {
+  TIME_BUDGET_MS: 330000,  // 5.5 минут на операцию
+  MAX_ATTEMPTS: 2,         // Попыток получения цены
+  BASE_DELAY_MS: 200,      // Базовая задержка
+  BETWEEN_ITEMS_MS: 150,   // Задержка между предметами
+  LOCK_TIMEOUT_SEC: 300,   // Таймаут блокировки (5 минут)
+  ERROR_MESSAGE_MAX_LENGTH: 200  // Максимальная длина сообщения об ошибке
+}
+
+API_CONFIG = {
+  STEAM_WEB_API: {
+    BASE_URL: 'https://steamwebapi.ru',
+    TIMEOUT_MS: 30000,
+    MAX_RETRIES: 3,
+    RETRY_DELAY_MS: 500,
+    MAX_ITEMS_PER_REQUEST: 50  // До 50 предметов за один запрос
+  },
+  OPENDOTA: {
+    BASE_URL: 'https://api.opendota.com/api',
+    TIMEOUT_MS: 30000,
+    MAX_RETRIES: 3,
+    RETRY_DELAY_MS: 500
+  }
+}
+
+HERO_STATS_UPDATE_SCHEDULE = {
+  HOURS: [2, 10, 18]  // 02:00, 10:00, 18:00 UTC
+}
+
+HERO_STATS_HISTORY_DAYS = 90  // Хранить 90 дней истории
 ```
 
 ### Конфигурация анализа трендов
@@ -491,6 +569,9 @@ avgProfitability = средняя прибыльность всех позици
 - [ ] Обработка граничных случаев (null, 0, отрицательные, `Number.isFinite()`)
 - [ ] Синхронизация данных между листами работает (History → Invest/Sales)
 - [ ] Новые записи вставляются сверху (используется `insertRowAfter(HEADER_ROW)`)
+- [ ] API запросы используют retry логику и обработку ошибок (429, таймауты)
+- [ ] Fallback механизмы работают (например, item_by_nameid для предметов, не найденных через основной endpoint)
+- [ ] Batch операции для API запросов (SteamWebAPI.ru поддерживает до 50 предметов за раз)
 
 ---
 

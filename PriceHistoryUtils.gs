@@ -25,7 +25,7 @@ function priceHistory_fetchHistoryForItem(itemName, appid = STEAM_APP_ID) {
     })
     
     const responseCode = response.getResponseCode()
-    if (responseCode !== 200) {
+    if (responseCode !== HTTP_STATUS.OK) {
       console.error(`PriceHistory: HTTP ошибка ${responseCode} для "${name}"`)
       return { ok: false, error: `http_${responseCode}` }
     }
@@ -180,11 +180,54 @@ function priceHistory_updateMinMaxInHistory(itemName, minPrice, maxPrice) {
 }
 
 /**
- * Рассчитывает Min/Max для всех предметов из History через pricehistory
- * Можно вызывать через меню или автоматически при добавлении нового предмета
+ * Проверяет, есть ли уже Min/Max у предмета в History
+ * @param {string} itemName - Название предмета
+ * @returns {Object} {hasMin: boolean, hasMax: boolean, minValue: number|null, maxValue: number|null}
  */
-function priceHistory_calculateMinMaxForAllItems() {
-  console.log('PriceHistory: начало расчета Min/Max для всех предметов')
+function priceHistory_checkMinMaxExists(itemName) {
+  const historySheet = getHistorySheet_()
+  if (!historySheet) {
+    return { hasMin: false, hasMax: false, minValue: null, maxValue: null }
+  }
+  
+  const lastRow = historySheet.getLastRow()
+  if (lastRow < DATA_START_ROW) {
+    return { hasMin: false, hasMax: false, minValue: null, maxValue: null }
+  }
+  
+  const names = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
+  
+  for (let i = 0; i < names.length; i++) {
+    const rowName = String(names[i][0] || '').trim()
+    if (rowName === itemName) {
+      const row = DATA_START_ROW + i
+      const minCell = historySheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.MIN_PRICE))
+      const maxCell = historySheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.MAX_PRICE))
+      const minValue = minCell.getValue()
+      const maxValue = maxCell.getValue()
+      
+      const hasMin = minValue !== null && minValue !== '' && Number.isFinite(Number(minValue)) && Number(minValue) > 0
+      const hasMax = maxValue !== null && maxValue !== '' && Number.isFinite(Number(maxValue)) && Number(maxValue) > 0
+      
+      return {
+        hasMin: hasMin,
+        hasMax: hasMax,
+        minValue: hasMin ? Number(minValue) : null,
+        maxValue: hasMax ? Number(maxValue) : null
+      }
+    }
+  }
+  
+  return { hasMin: false, hasMax: false, minValue: null, maxValue: null }
+}
+
+/**
+ * Рассчитывает Min/Max для всех предметов из History через SteamWebAPI.ru
+ * Использует SteamWebAPI.ru вместо pricehistory (быстрее, надежнее, до 50 предметов за раз)
+ * @param {boolean} onlyMissing - Если true, обновляет только предметы без Min/Max
+ */
+function priceHistory_calculateMinMaxForAllItems(onlyMissing = false) {
+  console.log('PriceHistory: начало расчета Min/Max для всех предметов (через SteamWebAPI.ru)')
   
   const historySheet = getHistorySheet_()
   if (!historySheet) {
@@ -213,104 +256,251 @@ function priceHistory_calculateMinMaxForAllItems() {
     }
   })
   
-  console.log(`PriceHistory: найдено ${uniqueNames.length} уникальных предметов`)
+  // Оптимизированная проверка Min/Max: batch чтение вместо проверки по одной строке
+  let itemsToProcess = uniqueNames
+  if (onlyMissing) {
+    // Читаем все Min/Max значения за один раз
+    const historySheet = getHistorySheet_()
+    const lastRow = historySheet.getLastRow()
+    
+    if (lastRow >= DATA_START_ROW) {
+      const count = lastRow - HEADER_ROW
+      const namesBatch = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), count, 1).getValues()
+      const minBatch = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.MIN_PRICE), count, 1).getValues()
+      const maxBatch = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.MAX_PRICE), count, 1).getValues()
+      
+      // Создаем карту существующих Min/Max
+      const existingMap = new Map()
+      for (let i = 0; i < count; i++) {
+        const rowName = String(namesBatch[i][0] || '').trim()
+        if (rowName) {
+          const minValue = minBatch[i][0]
+          const maxValue = maxBatch[i][0]
+          const hasMin = minValue !== null && minValue !== '' && Number.isFinite(Number(minValue)) && Number(minValue) > 0
+          const hasMax = maxValue !== null && maxValue !== '' && Number.isFinite(Number(maxValue)) && Number(maxValue) > 0
+          existingMap.set(rowName, { hasMin, hasMax })
+        }
+      }
+      
+      // Фильтруем только предметы без Min/Max
+      itemsToProcess = uniqueNames.filter(name => {
+        const exists = existingMap.get(name)
+        return !exists || !exists.hasMin || !exists.hasMax
+      })
+    } else {
+      itemsToProcess = uniqueNames
+    }
+    
+    console.log(`PriceHistory: найдено ${itemsToProcess.length} предметов без Min/Max (из ${uniqueNames.length} всего)`)
+  } else {
+    console.log(`PriceHistory: найдено ${uniqueNames.length} уникальных предметов`)
+  }
   
-  if (uniqueNames.length === 0) {
-    SpreadsheetApp.getUi().alert('Нет предметов для расчета Min/Max')
+  if (itemsToProcess.length === 0) {
+    const message = onlyMissing 
+      ? 'Все предметы уже имеют Min/Max значения'
+      : 'Нет предметов для расчета Min/Max'
+    SpreadsheetApp.getUi().alert(message)
     return
   }
+  
+  // Диалог с подтверждением
+  const ui = SpreadsheetApp.getUi()
+  const modeText = onlyMissing ? 'только у отсутствующих' : 'для всех предметов'
+  const confirmResponse = ui.alert(
+    'Расчет Min/Max',
+    `Будет обработано ${itemsToProcess.length} предметов (${modeText}).\nЭто может занять несколько минут.\n\nПродолжить?`,
+    ui.ButtonSet.YES_NO
+  )
+  
+  if (confirmResponse !== ui.Button.YES) {
+    return
+  }
+  
+  const finalItemsToProcess = itemsToProcess
   
   let successCount = 0
   let errorCount = 0
   let skippedCount = 0
   const startedAt = Date.now()
   
-  // Показываем прогресс
-  const ui = SpreadsheetApp.getUi()
-  const progressResponse = ui.alert(
-    'Расчет Min/Max',
-    `Будет обработано ${uniqueNames.length} предметов.\nЭто может занять несколько минут.\n\nПродолжить?`,
-    ui.ButtonSet.YES_NO
-  )
+  // Обрабатываем предметы пакетами по 50 штук (SteamWebAPI.ru поддерживает до 50 предметов за раз!)
+  const batchSize = API_CONFIG.STEAM_WEB_API.MAX_ITEMS_PER_REQUEST
+  let processedCount = 0
   
-  if (progressResponse !== ui.Button.YES) {
-    return
-  }
-  
-  // Обрабатываем каждый предмет
-  for (let i = 0; i < uniqueNames.length; i++) {
-    const itemName = uniqueNames[i]
-    
-    // Проверка бюджета времени (максимум 10 минут на операцию)
-    if (Date.now() - startedAt > 600000) {
-      console.warn(`PriceHistory: превышен бюджет времени, обработано ${i} из ${uniqueNames.length}`)
+  for (let batchStart = 0; batchStart < finalItemsToProcess.length; batchStart += batchSize) {
+    // Проверка бюджета времени (максимум 5 минут на операцию)
+    if (Date.now() - startedAt > 300000) {
+      console.warn(`PriceHistory: превышен бюджет времени, обработано ${processedCount} из ${finalItemsToProcess.length}`)
       break
     }
     
+    const batch = finalItemsToProcess.slice(batchStart, batchStart + batchSize)
+    console.log(`PriceHistory: обработка пакета ${Math.floor(batchStart / batchSize) + 1} (${batch.length} предметов из ${finalItemsToProcess.length})`)
+    
     try {
-      // Получаем историю цен
-      const historyResult = priceHistory_fetchHistoryForItem(itemName, STEAM_APP_ID)
+      // Получаем данные для пакета предметов через SteamWebAPI.ru
+      const batchResult = steamWebAPI_fetchItems(batch, 'dota2')
       
-      if (!historyResult.ok || !historyResult.prices) {
-        errorCount++
-        console.warn(`PriceHistory: не удалось получить историю для "${itemName}": ${historyResult.error}`)
-        Utilities.sleep(500) // Пауза между запросами
+      if (!batchResult.ok || !batchResult.items) {
+        errorCount += batch.length
+        console.warn(`PriceHistory: ошибка получения данных для пакета: ${batchResult.error || 'unknown'}`)
+        Utilities.sleep(2000) // Пауза перед следующим пакетом
         continue
       }
       
-      // Парсим данные
-      const parsedHistory = priceHistory_parseHistoryData(historyResult.prices)
+      // Создаем карту результатов с несколькими ключами для гибкого поиска
+      const itemsMap = {}
+      batchResult.items.forEach(item => {
+        // Добавляем предмет по нескольким ключам для гибкого поиска
+        const keys = [
+          (item.normalizedname || '').toLowerCase().trim(),
+          (item.marketname || '').toLowerCase().trim(),
+          (item.markethashname || '').toLowerCase().trim()
+        ].filter(k => k && k.length > 0)
+        
+        // Также добавляем ключ с удалением специальных символов (апострофы, кавычки и т.д.)
+        keys.forEach(key => {
+          const normalizedKey = key.replace(/[''""`]/g, '').replace(/\s+/g, ' ').trim()
+          if (normalizedKey) {
+            keys.push(normalizedKey)
+          }
+        })
+        
+        // Убираем дубликаты и добавляем в карту
+        const uniqueKeys = [...new Set(keys)]
+        uniqueKeys.forEach(key => {
+          if (!itemsMap[key]) {
+            itemsMap[key] = item
+          }
+        })
+      })
       
-      if (parsedHistory.length === 0) {
-        skippedCount++
-        console.warn(`PriceHistory: нет валидных данных в истории для "${itemName}"`)
-        continue
+      // Обрабатываем каждый предмет из пакета
+      batch.forEach(itemName => {
+        try {
+          // Пробуем найти предмет по разным вариантам названия
+          const searchVariants = [
+            itemName.toLowerCase().trim(),
+            itemName.toLowerCase().trim().replace(/[''""`]/g, ''), // Без апострофов
+            itemName.toLowerCase().trim().replace(/[''""`]/g, '').replace(/\s+/g, ' ') // Без апострофов и лишних пробелов
+          ]
+          
+          let itemData = null
+          for (const searchKey of searchVariants) {
+            if (itemsMap[searchKey]) {
+              itemData = itemsMap[searchKey]
+              break
+            }
+          }
+          
+          // Если не нашли точное совпадение, ищем похожее (fuzzy match)
+          if (!itemData) {
+            const searchKeyBase = itemName.toLowerCase().trim().replace(/[''""`]/g, '').replace(/\s+/g, ' ')
+            for (const key in itemsMap) {
+              const keyBase = key.replace(/[''""`]/g, '').replace(/\s+/g, ' ')
+              if (keyBase === searchKeyBase || key.includes(searchKeyBase) || searchKeyBase.includes(key)) {
+                itemData = itemsMap[key]
+                console.log(`PriceHistory: найдено приблизительное совпадение "${itemName}" -> "${itemsMap[key].marketname || itemsMap[key].markethashname}"`)
+                break
+              }
+            }
+          }
+          
+          // Если не нашли через основной endpoint, пробуем через item_by_nameid (fallback)
+          if (!itemData) {
+            console.log(`PriceHistory: предмет "${itemName}" не найден через основной endpoint, пробуем item_by_nameid`)
+            try {
+              const fallbackResult = steamWebAPI_fetchItemByNameIdViaName(itemName, 'dota2')
+              if (fallbackResult.ok && fallbackResult.item) {
+                itemData = fallbackResult.item
+                console.log(`PriceHistory: предмет "${itemName}" найден через item_by_nameid`)
+              }
+            } catch (e) {
+              console.warn(`PriceHistory: ошибка при fallback запросе для "${itemName}":`, e.message)
+            }
+          }
+          
+          if (!itemData) {
+            errorCount++
+            console.warn(`PriceHistory: предмет "${itemName}" не найден ни через основной endpoint, ни через item_by_nameid`)
+            return
+          }
+          
+          // Извлекаем Min/Max напрямую из ответа SteamWebAPI.ru (pricemin и pricemax)
+          // Проверяем наличие полей (могут быть строками или числами)
+          let minPrice = null
+          let maxPrice = null
+          
+          if (itemData.pricemin !== null && itemData.pricemin !== undefined && itemData.pricemin !== '') {
+            minPrice = Number(itemData.pricemin)
+          }
+          
+          if (itemData.pricemax !== null && itemData.pricemax !== undefined && itemData.pricemax !== '') {
+            maxPrice = Number(itemData.pricemax)
+          }
+          
+          // Логируем для отладки, если данные некорректны
+          if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice) || minPrice <= 0 || maxPrice <= 0) {
+            skippedCount++
+            console.warn(`PriceHistory: некорректные Min/Max для "${itemName}": Min=${minPrice}, Max=${maxPrice}. Данные предмета: marketname="${itemData.marketname || ''}", markethashname="${itemData.markethashname || ''}", pricemin="${itemData.pricemin}" (type: ${typeof itemData.pricemin}), pricemax="${itemData.pricemax}" (type: ${typeof itemData.pricemax})`)
+            return
+          }
+          
+          // Обновляем в History
+          const updated = priceHistory_updateMinMaxInHistory(itemName, minPrice, maxPrice)
+          
+          if (updated) {
+            successCount++
+            processedCount++
+            console.log(`PriceHistory: обновлено Min/Max для "${itemName}": Min=${minPrice}, Max=${maxPrice}`)
+          } else {
+            errorCount++
+            console.warn(`PriceHistory: не найдена строка для "${itemName}" в History`)
+          }
+          
+        } catch (e) {
+          errorCount++
+          console.error(`PriceHistory: исключение при обработке "${itemName}":`, e)
+        }
+      })
+      
+      // Пауза между пакетами (SteamWebAPI.ru может иметь лимиты)
+      if (batchStart + batchSize < itemsToProcess.length) {
+        Utilities.sleep(1000) // 1 сек между пакетами достаточно
       }
-      
-      // Рассчитываем Min/Max
-      const minMax = priceHistory_calculateMinMax(parsedHistory)
-      
-      if (!minMax.min || !minMax.max) {
-        skippedCount++
-        console.warn(`PriceHistory: не удалось рассчитать Min/Max для "${itemName}"`)
-        continue
-      }
-      
-      // Обновляем в History
-      const updated = priceHistory_updateMinMaxInHistory(itemName, minMax.min, minMax.max)
-      
-      if (updated) {
-        successCount++
-        console.log(`PriceHistory: обновлено Min/Max для "${itemName}": Min=${minMax.min}, Max=${minMax.max}`)
-      } else {
-        errorCount++
-        console.warn(`PriceHistory: не найдена строка для "${itemName}" в History`)
-      }
-      
-      // Пауза между запросами (чтобы не перегружать Steam API)
-      Utilities.sleep(800)
       
     } catch (e) {
-      errorCount++
-      console.error(`PriceHistory: исключение при обработке "${itemName}":`, e)
+      errorCount += batch.length
+      console.error(`PriceHistory: исключение при обработке пакета:`, e)
+      Utilities.sleep(2000)
     }
   }
   
   // Показываем результат
-  const message = `Расчет Min/Max завершен!\n\n` +
+  const modeTextResult = onlyMissing ? ' (только отсутствующие)' : ''
+  const message = `Расчет Min/Max завершен${modeTextResult}!\n\n` +
     `Успешно: ${successCount}\n` +
     `Ошибок: ${errorCount}\n` +
     `Пропущено: ${skippedCount}\n` +
-    `Всего: ${uniqueNames.length}`
+    `Всего обработано: ${itemsToProcess.length}`
   
   console.log(`PriceHistory: ${message}`)
   
   try {
-    logAutoAction_('PriceHistory', 'Расчет Min/Max для всех предметов', `OK (успешно: ${successCount}, ошибок: ${errorCount}, пропущено: ${skippedCount})`)
+    logAutoAction_('PriceHistory', `Расчет Min/Max${modeTextResult}`, `OK (успешно: ${successCount}, ошибок: ${errorCount}, пропущено: ${skippedCount})`)
     ui.alert(message)
   } catch (e) {
     console.log('PriceHistory: невозможно показать UI')
   }
+}
+
+/**
+ * Рассчитывает Min/Max только для предметов, у которых Min/Max отсутствуют
+ * Полезно для продолжения после принудительного завершения скрипта
+ */
+function priceHistory_calculateMinMaxForMissingItems() {
+  priceHistory_calculateMinMaxForAllItems(true)
 }
 
 /**

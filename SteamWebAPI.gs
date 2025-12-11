@@ -34,56 +34,35 @@ function steamWebAPI_fetchItems(itemNames, game = 'dota2') {
   
   const url = `${baseUrl}?${params.join('&')}`
   
-  let attempts = 0
-  const maxRetries = API_CONFIG.STEAM_WEB_API.MAX_RETRIES
-  
-  while (attempts < maxRetries) {
-    try {
-      const options = {
-        method: 'GET',
-        muteHttpExceptions: true
-      }
-      
-      const response = UrlFetchApp.fetch(url, options)
-      const responseCode = response.getResponseCode()
-      const responseText = response.getContentText()
-      
-      if (responseCode === 429) {
-        const delay = API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS * Math.pow(2, attempts)
-        console.warn(`SteamWebAPI: лимит запросов, повтор через ${delay}ms (попытка ${attempts + 1}/${maxRetries})`)
-        Utilities.sleep(delay)
-        attempts++
-        continue
-      }
-      
-      if (responseCode !== 200) {
-        console.error(`SteamWebAPI: HTTP ошибка ${responseCode}: ${responseText.substring(0, 200)}`)
-        return { ok: false, error: `http_${responseCode}`, details: responseText.substring(0, 200) }
-      }
-      
-      const items = JSON.parse(responseText)
-      
-      if (!Array.isArray(items)) {
-        console.error('SteamWebAPI: неожиданный формат ответа (не массив)')
-        return { ok: false, error: 'invalid_format', details: 'Response is not an array' }
-      }
-      
-      return { ok: true, items: items }
-      
-    } catch (e) {
-      attempts++
-      if (attempts >= maxRetries) {
-        console.error('SteamWebAPI: исключение после всех попыток:', e)
-        return { ok: false, error: 'exception', details: e.message }
-      }
-      
-      const delay = API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS * Math.pow(2, attempts - 1)
-      console.warn(`SteamWebAPI: ошибка, повтор через ${delay}ms (попытка ${attempts}/${maxRetries}):`, e.message)
-      Utilities.sleep(delay)
-    }
+  const options = {
+    method: 'GET',
+    muteHttpExceptions: true
   }
   
-  return { ok: false, error: 'max_retries_exceeded' }
+  const result = fetchWithRetry_(url, options, {
+    maxRetries: API_CONFIG.STEAM_WEB_API.MAX_RETRIES,
+    retryDelayMs: API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS,
+    apiName: 'SteamWebAPI'
+  })
+  
+  if (!result.ok) {
+    return result
+  }
+  
+  try {
+    const responseText = result.response.getContentText()
+    const items = JSON.parse(responseText)
+    
+    if (!Array.isArray(items)) {
+      console.error('SteamWebAPI: неожиданный формат ответа (не массив)')
+      return { ok: false, error: 'invalid_format', details: 'Response is not an array' }
+    }
+    
+    return { ok: true, items: items }
+  } catch (e) {
+    console.error('SteamWebAPI: ошибка парсинга ответа:', e)
+    return { ok: false, error: 'parse_error', details: e.message }
+  }
 }
 
 /**
@@ -268,74 +247,88 @@ function steamWebAPI_fetchItemByNameId(nameId) {
   const baseUrl = `${API_CONFIG.STEAM_WEB_API.BASE_URL}/api/item_by_nameid`
   const url = `${baseUrl}?nameid=${encodeURIComponent(nameId)}`
   
-  let attempts = 0
-  const maxRetries = API_CONFIG.STEAM_WEB_API.MAX_RETRIES
-  
-  while (attempts < maxRetries) {
-    try {
-      const options = {
-        method: 'GET',
-        muteHttpExceptions: true,
-        headers: {
-          'Accept': 'application/json'
-        }
-      }
-      
-      const response = UrlFetchApp.fetch(url, options)
-      const responseCode = response.getResponseCode()
-      const responseText = response.getContentText()
-      
-      if (responseCode === 429) {
-        const delay = API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS * Math.pow(2, attempts)
-        console.warn(`SteamWebAPI: лимит запросов (item_by_nameid), повтор через ${delay}ms (попытка ${attempts + 1}/${maxRetries})`)
-        Utilities.sleep(delay)
-        attempts++
-        continue
-      }
-      
-      if (responseCode !== 200) {
-        console.error(`SteamWebAPI: HTTP ошибка ${responseCode} (item_by_nameid): ${responseText.substring(0, 200)}`)
-        return { ok: false, error: `http_${responseCode}`, details: responseText.substring(0, 200) }
-      }
-      
-      const item = JSON.parse(responseText)
-      
-      if (!item || typeof item !== 'object') {
-        console.error('SteamWebAPI: неожиданный формат ответа (item_by_nameid, не объект)')
-        return { ok: false, error: 'invalid_format', details: 'Response is not an object' }
-      }
-      
-      return { ok: true, item: item }
-      
-    } catch (e) {
-      attempts++
-      if (attempts >= maxRetries) {
-        console.error('SteamWebAPI: исключение после всех попыток (item_by_nameid):', e)
-        return { ok: false, error: 'exception', details: e.message }
-      }
-      
-      const delay = API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS * Math.pow(2, attempts - 1)
-      console.warn(`SteamWebAPI: ошибка (item_by_nameid), повтор через ${delay}ms (попытка ${attempts}/${maxRetries}):`, e.message)
-      Utilities.sleep(delay)
+  const options = {
+    method: 'GET',
+    muteHttpExceptions: true,
+    headers: {
+      'Accept': 'application/json'
     }
   }
   
-  return { ok: false, error: 'max_retries_exceeded' }
+  const result = fetchWithRetry_(url, options, {
+    maxRetries: API_CONFIG.STEAM_WEB_API.MAX_RETRIES,
+    retryDelayMs: API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS,
+    apiName: 'SteamWebAPI (item_by_nameid)'
+  })
+  
+  if (!result.ok) {
+    return result
+  }
+  
+  try {
+    const responseText = result.response.getContentText()
+    const item = JSON.parse(responseText)
+    
+    if (!item || typeof item !== 'object') {
+      console.error('SteamWebAPI: неожиданный формат ответа (item_by_nameid, не объект)')
+      return { ok: false, error: 'invalid_format', details: 'Response is not an object' }
+    }
+    
+    return { ok: true, item: item }
+  } catch (e) {
+    console.error('SteamWebAPI: ошибка парсинга ответа (item_by_nameid):', e)
+    return { ok: false, error: 'parse_error', details: e.message }
+  }
 }
 
 /**
  * Получает данные о предмете по названию через item_by_nameid endpoint
  * API автоматически определяет NameID из базы данных по названию
+ * Использует параметр `name` для поиска по Market Hash Name
  * @param {string} itemName - Название предмета
+ * @param {string} game - Игра ('dota2', 'cs2', 'rust', 'tf2')
  * @returns {Object} {ok: boolean, item?: Object, error?: string}
  */
-function steamWebAPI_fetchItemByNameIdViaName(itemName) {
+function steamWebAPI_fetchItemByNameIdViaName(itemName, game = 'dota2') {
   if (!itemName || itemName.trim().length === 0) {
     return { ok: false, error: 'empty_name' }
   }
   
-  // API позволяет искать по названию через параметр nameid
-  return steamWebAPI_fetchItemByNameId(itemName)
+  const baseUrl = `${API_CONFIG.STEAM_WEB_API.BASE_URL}/api/item_by_nameid`
+  const url = `${baseUrl}?game=${encodeURIComponent(game)}&name=${encodeURIComponent(itemName)}`
+  
+  const options = {
+    method: 'GET',
+    muteHttpExceptions: true,
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+  
+  const result = fetchWithRetry_(url, options, {
+    maxRetries: API_CONFIG.STEAM_WEB_API.MAX_RETRIES,
+    retryDelayMs: API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS,
+    apiName: 'SteamWebAPI (item_by_nameid via name)'
+  })
+  
+  if (!result.ok) {
+    return result
+  }
+  
+  try {
+    const responseText = result.response.getContentText()
+    const data = JSON.parse(responseText)
+    
+    // API возвращает массив, берем первый элемент
+    if (Array.isArray(data) && data.length > 0) {
+      return { ok: true, item: data[0] }
+    }
+    
+    return { ok: false, error: 'no_data', details: 'Empty response array' }
+  } catch (e) {
+    console.error('SteamWebAPI: ошибка парсинга ответа (item_by_nameid via name):', e)
+    return { ok: false, error: 'parse_error', details: e.message }
+  }
 }
 
 /**

@@ -19,24 +19,26 @@ function openDota_fetchHeroStats(rankTier = null) {
   // Если указан ранг, можно использовать фильтры (но в базовом API их нет)
   // Для фильтрации по рангу нужно использовать другой endpoint или фильтровать на стороне клиента
   
+  const options = {
+    method: 'GET',
+    muteHttpExceptions: true,
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+  
+  const result = fetchWithRetry_(url, options, {
+    maxRetries: API_CONFIG.OPENDOTA.MAX_RETRIES,
+    retryDelayMs: API_CONFIG.OPENDOTA.RETRY_DELAY_MS,
+    apiName: 'OpenDota'
+  })
+  
+  if (!result.ok) {
+    return result
+  }
+  
   try {
-    const options = {
-      method: 'GET',
-      muteHttpExceptions: true,
-      headers: {
-        'Accept': 'application/json'
-      }
-    }
-    
-    const response = UrlFetchApp.fetch(url, options)
-    const responseCode = response.getResponseCode()
-    const responseText = response.getContentText()
-    
-    if (responseCode !== 200) {
-      console.error(`OpenDota: HTTP ошибка ${responseCode}: ${responseText.substring(0, 200)}`)
-      return { ok: false, error: `http_${responseCode}`, details: responseText.substring(0, 200) }
-    }
-    
+    const responseText = result.response.getContentText()
     const heroes = JSON.parse(responseText)
     
     if (!Array.isArray(heroes)) {
@@ -91,10 +93,9 @@ function openDota_fetchHeroStats(rankTier = null) {
     })
     
     return { ok: true, heroStats: heroStats }
-    
   } catch (e) {
-    console.error('OpenDota: исключение при получении статистики:', e)
-    return { ok: false, error: 'exception', details: e.message }
+    console.error('OpenDota: ошибка парсинга ответа:', e)
+    return { ok: false, error: 'parse_error', details: e.message }
   }
 }
 
@@ -172,8 +173,9 @@ function openDota_testConnection() {
     
     console.log(`OpenDota: получен ответ ${responseCode}, длина: ${responseText.length}`)
     
-    if (responseCode !== 200) {
-      const errorMessage = `❌ Ошибка HTTP ${responseCode}\n\n${responseText.substring(0, 200)}`
+    if (responseCode !== HTTP_STATUS.OK) {
+      const errorPreview = responseText.substring(0, LIMITS.ERROR_MESSAGE_MAX_LENGTH)
+      const errorMessage = `❌ Ошибка HTTP ${responseCode}\n\n${errorPreview}`
       console.error('OpenDota test:', errorMessage)
       ui.alert('Тест OpenDota API', errorMessage, ui.ButtonSet.OK)
       return { ok: false, error: `http_${responseCode}` }

@@ -1,5 +1,57 @@
 // Общие утилиты для всех модулей
 
+/**
+ * Универсальная функция для выполнения HTTP запросов с retry логикой
+ * @param {string} url - URL для запроса
+ * @param {Object} options - Опции для UrlFetchApp.fetch
+ * @param {Object} config - Конфигурация retry (maxRetries, retryDelayMs, apiName)
+ * @returns {Object} {ok: boolean, response?: Object, error?: string, details?: string}
+ */
+function fetchWithRetry_(url, options = {}, config = {}) {
+  const maxRetries = config.maxRetries || API_CONFIG.STEAM_WEB_API.MAX_RETRIES
+  const retryDelayMs = config.retryDelayMs || API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS
+  const apiName = config.apiName || 'API'
+  
+  let attempts = 0
+  
+  while (attempts < maxRetries) {
+    try {
+      const response = UrlFetchApp.fetch(url, options)
+      const responseCode = response.getResponseCode()
+      
+      if (responseCode === HTTP_STATUS.RATE_LIMIT) {
+        const delay = retryDelayMs * Math.pow(2, attempts)
+        console.warn(`${apiName}: лимит запросов, повтор через ${delay}ms (попытка ${attempts + 1}/${maxRetries})`)
+        Utilities.sleep(delay)
+        attempts++
+        continue
+      }
+      
+      if (responseCode !== HTTP_STATUS.OK) {
+        const responseText = response.getContentText()
+        const errorPreview = responseText.substring(0, LIMITS.ERROR_MESSAGE_MAX_LENGTH)
+        console.error(`${apiName}: HTTP ошибка ${responseCode}: ${errorPreview}`)
+        return { ok: false, error: `http_${responseCode}`, details: errorPreview }
+      }
+      
+      return { ok: true, response: response }
+      
+    } catch (e) {
+      attempts++
+      if (attempts >= maxRetries) {
+        console.error(`${apiName}: исключение после всех попыток:`, e)
+        return { ok: false, error: 'exception', details: e.message }
+      }
+      
+      const delay = retryDelayMs * Math.pow(2, attempts - 1)
+      console.warn(`${apiName}: ошибка, повтор через ${delay}ms (попытка ${attempts}/${maxRetries}):`, e.message)
+      Utilities.sleep(delay)
+    }
+  }
+  
+  return { ok: false, error: 'max_retries_exceeded' }
+}
+
 function parseLocalizedPrice_(raw) {
   if (raw == null) return { ok: false, error: 'no_price' }
   const normalized = String(raw).replace(/[^0-9.,]+/g, '').replace(',', '.')

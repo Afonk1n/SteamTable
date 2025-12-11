@@ -79,13 +79,20 @@ const PRICE_COLLECTION_PERIODS = {
   EVENING: 'evening'      // Период "день" (12:00-00:10) - техническое название
 }
 
+// HTTP статус коды
+const HTTP_STATUS = {
+  OK: 200,
+  RATE_LIMIT: 429
+}
+
 // Таймауты и лимиты
 const LIMITS = {
   TIME_BUDGET_MS: 330000,  // 5.5 минут на операцию
   MAX_ATTEMPTS: 2,         // Попыток получения цены
   BASE_DELAY_MS: 200,      // Базовая задержка
   BETWEEN_ITEMS_MS: 150,   // Задержка между предметами
-  LOCK_TIMEOUT_SEC: 300    // Таймаут блокировки (5 минут)
+  LOCK_TIMEOUT_SEC: 300,   // Таймаут блокировки (5 минут)
+  ERROR_MESSAGE_MAX_LENGTH: 200  // Максимальная длина сообщения об ошибке
 }
 
 // API конфигурация
@@ -296,10 +303,10 @@ const HEADERS = {
   
   HERO_MAPPING: [
     'Item Name',
+    'Image',
     'Hero Name',
     'Hero ID',
     'Auto-detected',
-    'Verified',
     'Category'
   ]
 }
@@ -316,10 +323,10 @@ const HERO_STATS_COLUMNS = {
 // Идентификаторы колонок для HeroMapping
 const HERO_MAPPING_COLUMNS = {
   ITEM_NAME: 'A',
-  HERO_NAME: 'B',
-  HERO_ID: 'C',
-  AUTO_DETECTED: 'D',
-  VERIFIED: 'E',
-  CATEGORY: 'F'
+  IMAGE: 'B',  // Добавлено для отображения изображений предметов
+  HERO_NAME: 'C',
+  HERO_ID: 'D',
+  AUTO_DETECTED: 'E',
+  CATEGORY: 'F'  // Было G, теперь F после удаления Verified
 }
 
