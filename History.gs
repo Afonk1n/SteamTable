@@ -639,26 +639,31 @@ function history_updateCurrentPriceMinMax_(sheet = null) {
     const name = String(names[i][0] || '').trim()
     if (!name) continue
     
-    // ОПТИМИЗАЦИЯ: Получаем текущую цену напрямую из уже прочитанных данных
+    // Ищем последнюю заполненную цену из всех колонок (включая старые)
+    let lastFoundPrice = null
+    if (priceDataWidth > 0 && priceData[i]) {
+      for (let j = priceData[i].length - 1; j >= 0; j--) {
+        const value = priceData[i][j]
+        if (typeof value === 'number' && !isNaN(value) && value > 0) {
+          lastFoundPrice = value
+          break
+        }
+      }
+    }
+    
+    // Проверяем, есть ли цена за текущий период
+    let currentPeriodPrice = null
     if (currentPeriodColIndex >= 0 && priceDataWidth > 0 && priceData[i] && priceData[i][currentPeriodColIndex]) {
       const price = priceData[i][currentPeriodColIndex]
       if (typeof price === 'number' && !isNaN(price) && price > 0) {
-        currentPrices[i][0] = price
-      } else {
-        // Если цена за текущий период отсутствует, ищем последнюю заполненную цену
-        let foundPrice = null
-        for (let j = priceData[i].length - 1; j >= 0; j--) {
-          const value = priceData[i][j]
-          if (typeof value === 'number' && !isNaN(value) && value > 0) {
-            foundPrice = value
-            break
-          }
-        }
-        currentPrices[i][0] = foundPrice
+        currentPeriodPrice = price
       }
-    } else {
-      currentPrices[i][0] = null
     }
+    
+    // Если есть цена за текущий период - используем её
+    // Если нет, но есть последняя заполненная цена - используем её (будет окрашена в желтый)
+    // Только если вообще нет цен - ставим null
+    currentPrices[i][0] = currentPeriodPrice || lastFoundPrice
     
     // Вычисляем Min и Max из всех цен
     const prices = []

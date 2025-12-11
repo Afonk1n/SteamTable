@@ -86,8 +86,11 @@ function telegram_sendMessage(message, parseMode = 'HTML', disablePreview = true
     if (result.ok) {
       return { ok: true }
     } else {
-      console.error('Telegram API error:', result)
-      return { ok: false, error: result.description || 'unknown' }
+      const errorCode = result.error_code || 'unknown'
+      const errorDescription = result.description || 'unknown'
+      console.error(`Telegram API error [${errorCode}]: ${errorDescription}`)
+      console.error('Full response:', JSON.stringify(result))
+      return { ok: false, error: errorDescription, errorCode: errorCode }
     }
   } catch (e) {
     console.error('Telegram send error:', e)
@@ -290,8 +293,14 @@ function telegram_checkPriceTargets() {
  * 3. Позиции с сильной просадкой (50%+, сигнал покупки)
  */
 function telegram_checkDailyPriceTargets() {
+  const now = new Date()
+  const hour = now.getHours()
+  const minute = now.getMinutes()
+  console.log(`Telegram: запуск ежедневных уведомлений в ${hour}:${minute.toString().padStart(2, '0')}`)
+  
   const config = telegram_getConfig()
   if (!config) {
+    console.log('Telegram: конфигурация не настроена, уведомления не отправлены')
     return // Telegram не настроен, просто выходим
   }
   
@@ -301,6 +310,7 @@ function telegram_checkDailyPriceTargets() {
     Utilities.sleep(1000) // Пауза между сообщениями
   } catch (e) {
     console.error('Telegram: критическая ошибка при отправке ежедневного отчета:', e)
+    console.error('Stack trace:', e.stack)
     // Продолжаем выполнение, даже если отчет не отправился
   }
   
@@ -369,6 +379,9 @@ function telegram_checkDailyPriceTargets() {
   // Просевшие позиции - от самых просевших (по проценту просадки) к менее просевшим
   strongDrop.sort((a, b) => b.dropPercent - a.dropPercent)
   
+  let messagesSent = 0
+  let messagesFailed = 0
+  
   // Отправляем первое сообщение: достигшие цели
   if (reachedGoal.length > 0) {
     let message = `🎯 <b>Позиции, достигшие цели</b>\n\n`
@@ -382,7 +395,13 @@ function telegram_checkDailyPriceTargets() {
     
     message += `Всего: <b>${reachedGoal.length}</b> позиций`
     
-    telegram_sendMessage(message)
+    const result = telegram_sendMessage(message)
+    if (result.ok) {
+      messagesSent++
+    } else {
+      messagesFailed++
+      console.error(`Telegram: ошибка отправки сообщения о достигших цели: ${result.error}`)
+    }
     Utilities.sleep(1000) // Пауза между сообщениями
   }
   
@@ -400,13 +419,22 @@ function telegram_checkDailyPriceTargets() {
     message += `Всего: <b>${strongDrop.length}</b> позиций\n\n`
     message += `Рекомендация: 🟩 КУПИТЬ`
     
-    telegram_sendMessage(message)
+    const result = telegram_sendMessage(message)
+    if (result.ok) {
+      messagesSent++
+    } else {
+      messagesFailed++
+      console.error(`Telegram: ошибка отправки сообщения о просадке: ${result.error}`)
+    }
   }
   
   if (reachedGoal.length === 0 && strongDrop.length === 0) {
     console.log('Telegram: нет позиций для уведомлений')
   } else {
     console.log(`Telegram: отправлено уведомлений - достигли цели: ${reachedGoal.length}, просадка: ${strongDrop.length}`)
+    if (messagesFailed > 0) {
+      console.error(`Telegram: ошибок при отправке: ${messagesFailed} из ${messagesSent + messagesFailed}`)
+    }
   }
 }
 

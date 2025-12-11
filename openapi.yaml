@@ -1,0 +1,92 @@
+openapi: 3.0.3
+info:
+  title: SteamWebAPI
+  description: |
+    Документация API для https://steamwebapi.ru/
+    
+    Позволяет получать данные о предметах Steam, истории цен, P2P-курсах и любые файлы из папки Data.
+  version: "1.0.0"
+servers:
+  - url: https://steamwebapi.ru
+paths:
+  /{filename}:
+    get:
+      summary: Получить любой файл из папки Data
+      parameters:
+        - in: path
+          name: filename
+          required: true
+          schema:
+            type: string
+          description: Имя файла (например, cs2_items.json, p2p_curce.json, prices.json)
+      responses:
+        '200':
+          description: Файл найден и возвращён
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Структура зависит от файла
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Файл не найден, возвращается notfound.png
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+  /api/item:
+    get:
+      summary: Поиск предметов по названию
+      parameters:
+        - in: query
+          name: game
+          required: true
+          schema:
+            type: string
+            enum: [cs2, dota2, rust, tf2]
+          description: Игра (cs2, dota2, rust, tf2)
+        - in: query
+          name: name
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          description: Названия предметов (до 50 штук)
+      responses:
+        '200':
+          description: JSON с данными о найденных предметах
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    market_hash_name:
+                      type: string
+                    price:
+                      type: number
+                    ...:
+                      description: Другие поля из таблицы <game>_items
+        '400':
+          description: Ошибка в параметрах запроса
+  /price_history_steam_all_data/:
+    get:
+      summary: Получить агрегированные или полные данные истории цен Steam
+      responses:
+        '200':
+          description: JSON с историей цен
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Структура зависит от реализации
+        '404':
+          description: Данные не найдены 

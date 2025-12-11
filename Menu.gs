@@ -117,6 +117,9 @@ function initializeAllTables() {
     sales_formatTable()
     history_formatTable()
     portfolioStats_formatTable()
+    // Создаем листы логов, если их еще нет
+    getOrCreateAutoLogSheet_()
+    getOrCreateLogSheet_()
     SpreadsheetApp.getUi().alert('✅ Все таблицы инициализированы и отформатированы')
   } catch (e) {
     console.error('Menu: ошибка инициализации таблиц:', e)
