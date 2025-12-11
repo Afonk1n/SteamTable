@@ -19,6 +19,7 @@ function invest_formatNewRow_(sheet, row) {
     PROFIT_AFTER_FEE: NUMBER_FORMATS.PERCENT, // J: Прибыль % с комиссией
     MIN_PRICE: NUMBER_FORMATS.CURRENCY,    // L: Min цена
     MAX_PRICE: NUMBER_FORMATS.CURRENCY     // M: Max цена
+    // N-Z: Investment Score, Рекомендация, Фаза, Потенциал, Тренд, Дней смены, Hero Trend, Метрики, Risk Level, Чекбоксы
   }
   
   formatNewRowUniversal_(sheet, row, INVEST_CONFIG, numberFormatConfig, false)
@@ -297,7 +298,7 @@ function invest_addOrUpdatePosition_(name, qtyToAdd, buyPricePerUnit) {
 
 function invest_formatTable() {
   const sheet = getOrCreateInvestSheet_()
-  const headers = HEADERS.INVEST // 18 колонок (убрали H, K и DAYS_CHANGE)
+  const headers = HEADERS.INVEST // 28 колонок (новая структура)
   
   // Базовое форматирование таблицы
   const lastRow = formatTableBase_(sheet, headers, INVEST_COLUMNS, getInvestSheet_, 'Invest')
@@ -305,27 +306,36 @@ function invest_formatTable() {
 
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.IMAGE), COLUMN_WIDTHS.IMAGE)
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.NAME), COLUMN_WIDTHS.NAME)
-  sheet.setColumnWidths(3, 11, COLUMN_WIDTHS.WIDE) // C-M (11 колонок после удаления H и K)
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.WIDE) // Объединенный формат, шире для текста
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.PHASE), COLUMN_WIDTHS.WIDE)
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.POTENTIAL), COLUMN_WIDTHS.MEDIUM)
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE)
+  sheet.setColumnWidths(3, 9, COLUMN_WIDTHS.WIDE) // C-K (9 колонок)
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.MIN_PRICE), COLUMN_WIDTHS.MEDIUM) // L
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.MAX_PRICE), COLUMN_WIDTHS.MEDIUM) // M
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.INVESTMENT_SCORE), 130) // N
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE) // O
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.PHASE), COLUMN_WIDTHS.WIDE) // P
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.POTENTIAL), COLUMN_WIDTHS.MEDIUM) // Q
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.WIDE) // R
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.DAYS_CHANGE), COLUMN_WIDTHS.MEDIUM) // S
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.HERO_TREND), COLUMN_WIDTHS.MEDIUM) // T
+  sheet.setColumnWidths(getColumnIndex(INVEST_COLUMNS.VOLATILITY_INDEX), 5, COLUMN_WIDTHS.MEDIUM) // U-Y (метрики)
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // Z
 
   if (lastRow > 1) {
     sheet.getRange(`D2:I${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // D-G, H (с комиссией), I (Профит)
     sheet.getRange(`F2:F${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Цель - явное форматирование для гарантии
-    sheet.getRange(`J2:J${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль % с комиссией (было L)
-    sheet.getRange(`L2:M${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min, Max (было O-P)
+    sheet.getRange(`J2:J${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // Прибыль % с комиссией
+    sheet.getRange(`L2:M${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // Min, Max
     // Форматирование колонки Потенциал (Q) как процент с знаком "+"
     const potentialCol = getColumnIndex(INVEST_COLUMNS.POTENTIAL)
     sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1).setNumberFormat('+0%;-0%;"—"')
+    // Форматирование метрик (U-Y) как процент или число
+    sheet.getRange(`U2:Y${lastRow}`).setNumberFormat('0.00') // Метрики как числа 0-1
 
     const dataRange = sheet.getRange(DATA_START_ROW, 1, lastRow - 1, headers.length)
     dataRange.setVerticalAlignment('middle').setWrap(true)
 
     sheet.getRange(`A2:A${lastRow}`).setHorizontalAlignment('center')
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
-    sheet.getRange(`C2:R${lastRow}`).setHorizontalAlignment('center') // До R (было S, убрали DAYS_CHANGE)
+    sheet.getRange(`C2:AB${lastRow}`).setHorizontalAlignment('center') // До AB (чекбоксы)
   }
 
   if (lastRow > 1) {
@@ -349,26 +359,41 @@ function invest_formatTable() {
   }
 
   // Заморозка строки уже выполнена в formatTableBase_()
-  // Добавляем колонку кнопки «Продать» если отсутствует
+  // Добавляем колонки чекбоксов «Купить?» и «Продать?» если отсутствуют
   const lastCol = sheet.getLastColumn()
-  const sellHeader = 'Продать'
+  const buyHeader = 'Купить?'
+  const sellHeader = 'Продать?'
+  let buyCol = null
   let sellCol = null
+  
   for (let c = 1; c <= lastCol; c++) {
-    if (sheet.getRange(1, c).getValue() === sellHeader) {
-      sellCol = c; break
+    const header = sheet.getRange(1, c).getValue()
+    if (header === buyHeader) buyCol = c
+    if (header === sellHeader) sellCol = c
+  }
+  
+  if (!buyCol) {
+    buyCol = getColumnIndex(INVEST_COLUMNS.BUY_CHECKBOX)
+    sheet.getRange(1, buyCol).setValue(buyHeader)
+    formatHeaderRange_(sheet.getRange(HEADER_ROW, buyCol, 1, 1))
+    if (lastRow > 1) {
+      const rng = sheet.getRange(DATA_START_ROW, buyCol, lastRow - 1, 1)
+      rng.insertCheckboxes()
+      rng.setHorizontalAlignment('center')
     }
   }
+  
   if (!sellCol) {
-    sellCol = lastCol + 1
+    sellCol = getColumnIndex(INVEST_COLUMNS.SELL_CHECKBOX)
     sheet.getRange(1, sellCol).setValue(sellHeader)
+    formatHeaderRange_(sheet.getRange(HEADER_ROW, sellCol, 1, 1))
+    if (lastRow > 1) {
+      const rng = sheet.getRange(DATA_START_ROW, sellCol, lastRow - 1, 1)
+      rng.insertCheckboxes()
+      rng.setHorizontalAlignment('center')
+    }
   }
-  if (lastRow > 1) {
-    const rng = sheet.getRange(DATA_START_ROW, sellCol, lastRow - 1, 1)
-    rng.insertCheckboxes()
-    rng.setHorizontalAlignment('center')
-  }
-  // Стиль шапки «Продать» как и остальные
-  formatHeaderRange_(sheet.getRange(HEADER_ROW, sellCol, 1, 1))
+  
   SpreadsheetApp.getUi().alert('Форматирование завершено (Invest)')
 }
 
@@ -385,7 +410,7 @@ function invest_syncMinMaxFromHistory(updateAll = true) {
   const sheet = getInvestSheet_()
   if (!sheet) return
 
-  // INVEST_COLUMNS.MIN_PRICE = 'N', INVEST_COLUMNS.MAX_PRICE = 'O'
+  // INVEST_COLUMNS.MIN_PRICE = 'L', INVEST_COLUMNS.MAX_PRICE = 'M'
   const minColIndex = getColumnIndex(INVEST_COLUMNS.MIN_PRICE)
   const maxColIndex = getColumnIndex(INVEST_COLUMNS.MAX_PRICE)
   
@@ -397,7 +422,7 @@ function invest_syncTrendDaysFromHistory(updateAll = true) {
   const sheet = getInvestSheet_()
   if (!sheet) return
 
-  // INVEST_COLUMNS.TREND = 'N' (теперь содержит объединенный формат "🟥 Падает 35 дн.")
+  // INVEST_COLUMNS.TREND = 'R' (теперь содержит объединенный формат "🟥 Падает 35 дн.")
   const trendColIndex = getColumnIndex(INVEST_COLUMNS.TREND)
   
   return syncTrendFromHistoryUniversal_(sheet, trendColIndex, updateAll)
@@ -408,7 +433,7 @@ function invest_syncExtendedAnalyticsFromHistory(updateAll = true) {
   const sheet = getInvestSheet_()
   if (!sheet) return
 
-  // INVEST_COLUMNS: PHASE = 'R', POTENTIAL = 'S', RECOMMENDATION = 'T'
+  // INVEST_COLUMNS: PHASE = 'P', POTENTIAL = 'Q', RECOMMENDATION = 'O'
   const phaseColIndex = getColumnIndex(INVEST_COLUMNS.PHASE)
   const potentialColIndex = getColumnIndex(INVEST_COLUMNS.POTENTIAL)
   const recommendationColIndex = getColumnIndex(INVEST_COLUMNS.RECOMMENDATION)
@@ -426,5 +451,213 @@ function invest_updateAllAnalytics() {
     invest_syncTrendDaysFromHistory,
     invest_syncExtendedAnalyticsFromHistory
   )
+}
+
+// ===== СИСТЕМА ИНВЕСТИЦИОННЫХ РЕКОМЕНДАЦИЙ =====
+
+/**
+ * Получение данных из SteamWebAPI для расчета метрик
+ * @param {Array<string>} itemNames - Массив названий предметов
+ * @returns {Object} Объект {itemName: itemData}
+ */
+function invest_updateMetricsFromSteamWebAPI(itemNames) {
+  const itemsData = {}
+  
+  // Batch запросы (до 50 предметов за раз)
+  const batchSize = API_CONFIG.STEAM_WEB_API.MAX_ITEMS_PER_REQUEST
+  for (let i = 0; i < itemNames.length; i += batchSize) {
+    const batch = itemNames.slice(i, i + batchSize)
+    const result = steamWebAPI_fetchItems(batch, 'dota2')
+    if (result.ok && result.items) {
+      result.items.forEach(item => {
+        if (item.marketname) {
+          itemsData[item.marketname] = item
+        }
+      })
+    }
+    // Задержка между batch запросами
+    if (i + batchSize < itemNames.length) {
+      Utilities.sleep(500)
+    }
+  }
+  
+  return itemsData
+}
+
+/**
+ * Расчет всех метрик для позиций в Invest
+ */
+function invest_calculateAllMetrics() {
+  const sheet = getInvestSheet_()
+  if (!sheet) return
+  
+  const lastRow = sheet.getLastRow()
+  if (lastRow < DATA_START_ROW) return
+  
+  const itemNames = sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
+  const itemNamesList = itemNames.map(row => String(row[0] || '').trim()).filter(name => name)
+  
+  // Получаем данные из SteamWebAPI
+  const itemsData = invest_updateMetricsFromSteamWebAPI(itemNamesList)
+  
+  // Получаем маппинги героев
+  const mappings = heroMapping_getAllMappings()
+  
+  // Получаем историю цен из History
+  const historySheet = getHistorySheet_()
+  
+  // Обновляем метрики для каждой строки
+  for (let i = 0; i < itemNames.length; i++) {
+    const itemName = String(itemNames[i][0] || '').trim()
+    if (!itemName) continue
+    
+    const row = DATA_START_ROW + i
+    const itemData = itemsData[itemName]
+    if (!itemData) continue
+    
+    const mapping = mappings[itemName]
+    const category = mapping ? mapping.category : 'Common Item'
+    const heroId = mapping && mapping.heroId ? mapping.heroId : null
+    const rankCategory = mapping && mapping.heroId ? 'High Rank' : null
+    
+    // Получаем историю цен
+    let historyData = null
+    if (historySheet) {
+      historyData = history_getPriceHistoryForItem_(historySheet, historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues().findIndex(r => String(r[0] || '').trim() === itemName) + DATA_START_ROW)
+    }
+    
+    // Рассчитываем метрики
+    const liquidityScore = analytics_calculateLiquidityScore(itemData)
+    const demandRatio = analytics_calculateDemandRatio(itemData)
+    const priceMomentum = analytics_calculatePriceMomentum(itemData, historyData)
+    const salesTrend = analytics_calculateSalesTrend(itemData)
+    const volatilityIndex = analytics_calculateVolatilityIndex(itemData, historyData)
+    
+    // Обновляем колонки метрик
+    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.LIQUIDITY_SCORE)).setValue(liquidityScore)
+    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.DEMAND_RATIO)).setValue(demandRatio)
+    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.PRICE_MOMENTUM)).setValue(priceMomentum)
+    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.SALES_TREND)).setValue(salesTrend)
+    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.VOLATILITY_INDEX)).setValue(volatilityIndex)
+    
+    // Hero Trend Score (только для Hero Items)
+    if (category === 'Hero Item' && heroId && rankCategory) {
+      const latestStats = heroStats_getLatestStats(heroId, rankCategory)
+      if (latestStats) {
+        const heroStatsObj = {[rankCategory]: latestStats}
+        const heroTrendScore = analytics_calculateHeroTrendScore(heroId, rankCategory, heroStatsObj)
+        sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.HERO_TREND)).setValue(analytics_formatScore(heroTrendScore))
+      }
+    }
+  }
+}
+
+/**
+ * Расчет Investment Score для всех позиций в Invest
+ */
+function invest_updateInvestmentScores() {
+  const sheet = getInvestSheet_()
+  if (!sheet) return
+  
+  const lastRow = sheet.getLastRow()
+  if (lastRow < DATA_START_ROW) return
+  
+  const itemNames = sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
+  const itemNamesList = itemNames.map(row => String(row[0] || '').trim()).filter(name => name)
+  
+  // Получаем данные из SteamWebAPI
+  const itemsData = invest_updateMetricsFromSteamWebAPI(itemNamesList)
+  
+  // Получаем маппинги героев
+  const mappings = heroMapping_getAllMappings()
+  
+  // Получаем историю цен из History
+  const historySheet = getHistorySheet_()
+  
+  // Обновляем Investment Score для каждой строки
+  for (let i = 0; i < itemNames.length; i++) {
+    const itemName = String(itemNames[i][0] || '').trim()
+    if (!itemName) continue
+    
+    const row = DATA_START_ROW + i
+    const itemData = itemsData[itemName]
+    if (!itemData) continue
+    
+    const mapping = mappings[itemName]
+    const category = mapping ? mapping.category : 'Common Item'
+    const heroId = mapping && mapping.heroId ? mapping.heroId : null
+    const rankCategory = mapping && mapping.heroId ? 'High Rank' : null
+    
+    // Получаем историю цен
+    let historyData = null
+    if (historySheet) {
+      const historyRow = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues().findIndex(r => String(r[0] || '').trim() === itemName)
+      if (historyRow >= 0) {
+        historyData = history_getPriceHistoryForItem_(historySheet, historyRow + DATA_START_ROW)
+      }
+    }
+    
+    // Получаем статистику героя
+    let heroStats = null
+    if (heroId && rankCategory) {
+      const latestStats = heroStats_getLatestStats(heroId, rankCategory)
+      if (latestStats) {
+        heroStats = {[rankCategory]: latestStats}
+      }
+    }
+    
+    // Рассчитываем Investment Score
+    const investmentScore = analytics_calculateInvestmentScore(
+      itemData,
+      heroStats,
+      historyData,
+      category,
+      heroId,
+      rankCategory
+    )
+    
+    // Обновляем колонку Investment Score
+    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.INVESTMENT_SCORE))
+      .setValue(analytics_formatScore(investmentScore))
+    
+    // Рассчитываем Risk Level
+    const volatilityIndex = analytics_calculateVolatilityIndex(itemData, historyData)
+    const demandRatio = analytics_calculateDemandRatio(itemData)
+    const riskLevel = analytics_calculateRiskLevel(investmentScore, volatilityIndex, demandRatio)
+    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.RISK_LEVEL)).setValue(riskLevel)
+  }
+}
+
+/**
+ * Генерация рекомендации на основе Investment Score
+ * @param {number} row - Номер строки
+ * @returns {string} Рекомендация
+ */
+function invest_generateRecommendation(row) {
+  const sheet = getInvestSheet_()
+  if (!sheet) return '👀 НАБЛЮДАТЬ'
+  
+  const investmentScoreStr = String(sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.INVESTMENT_SCORE)).getValue() || '').trim()
+  if (!investmentScoreStr || investmentScoreStr === '—') return '👀 НАБЛЮДАТЬ'
+  
+  // Парсим число из формата "🟩 0.93"
+  const scoreMatch = investmentScoreStr.match(/(\d+\.?\d*)/)
+  if (!scoreMatch) return '👀 НАБЛЮДАТЬ'
+  
+  const investmentScore = parseFloat(scoreMatch[1])
+  
+  const heroTrendStr = String(sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.HERO_TREND)).getValue() || '').trim()
+  const heroTrend = heroTrendStr !== '—' ? heroTrendStr : '—'
+  
+  if (investmentScore >= 0.75) {
+    return `🟩 КУПИТЬ (Score: ${(investmentScore * 100).toFixed(0)}%, Hero: ${heroTrend})`
+  }
+  if (investmentScore >= 0.60) {
+    return `🟨 ДЕРЖАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+  }
+  if (investmentScore < 0.40) {
+    return `🟥 ПРОДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+  }
+  return `👀 НАБЛЮДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
 }
 

@@ -27,23 +27,35 @@ function history_formatTable() {
   sheet.setColumnWidth(6, 120) // F - Текущая цена
   sheet.setColumnWidth(7, 100) // G - Min
   sheet.setColumnWidth(8, 100) // H - Max
-  sheet.setColumnWidth(9, 150)  // I - Trend (объединенный, шире)
-  sheet.setColumnWidth(10, 120) // J - Фаза (было K)
-  sheet.setColumnWidth(11, 100) // K - Потенциал (было L)
-  sheet.setColumnWidth(12, 130) // L - Рекомендация (было M)
+  sheet.setColumnWidth(9, 130) // I - Investment Score
+  sheet.setColumnWidth(10, 130) // J - Рекомендация
+  sheet.setColumnWidth(11, 120) // K - Фаза
+  sheet.setColumnWidth(12, 100) // L - Потенциал
+  sheet.setColumnWidth(13, 150) // M - Тренд (объединенный, шире)
+  sheet.setColumnWidth(14, 100) // N - Дней смены
+  sheet.setColumnWidth(15, 100) // O - Hero Trend
+  sheet.setColumnWidth(16, 120) // P - Contest Rate Change (7d)
+  sheet.setColumnWidth(17, 120) // Q - Contest Rate (current)
+  sheet.setColumnWidth(18, 100) // R - Pick Rate (current)
+  sheet.setColumnWidth(19, 100) // S - Win Rate (current)
+  sheet.setColumnWidth(20, 150) // T - Hero Name
 
   if (lastRow > 1) {
+    const dataCols = 20 // Количество колонок с данными (до дат)
     sheet
-      .getRange(2, 1, lastRow - 1, 12)
+      .getRange(2, 1, lastRow - 1, dataCols)
       .setVerticalAlignment('middle')
       .setHorizontalAlignment('center')
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
+    sheet.getRange(`T2:T${lastRow}`).setHorizontalAlignment('left') // Hero Name - выравнивание влево
     // Форматирование числовых колонок
     sheet.getRange(`F2:H${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
     // Форматирование колонки Потенциал (L) как процент с знаком "+"
     const potentialCol = getColumnIndex(HISTORY_COLUMNS.POTENTIAL)
     sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1)
       .setNumberFormat('+0%;-0%;"—"')
+    // Форматирование колонок статистики героя (P-S) как процент
+    sheet.getRange(`P2:S${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT)
   }
 
   sheet.setFrozenRows(HEADER_ROW)
@@ -105,6 +117,8 @@ function history_updateAllAnalytics_() {
   const sheet = getOrCreateHistorySheet_()
   history_updateCurrentPriceMinMax_(sheet)
   history_updateTrends()
+  // Синхронизация статистики героев (колонки O-T)
+  history_syncHeroStats()
   // ВАЖНО: Сначала применяем условное форматирование (для трендов, фаз, рекомендаций),
   // затем выделение min/max, чтобы оно не перезаписывалось условным форматированием
   history_applyAllConditionalFormatting_(sheet)
@@ -1136,17 +1150,18 @@ function history_updateTrends() {
   const lastCol = sheet.getLastColumn()
   const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 14
   
-  // Определяем номера колонок для расширенной аналитики (K, L, M)
+  // Определяем номера колонок для расширенной аналитики (K, L, J)
   const phaseCol = getColumnIndex(HISTORY_COLUMNS.PHASE)           // K
   const potentialCol = getColumnIndex(HISTORY_COLUMNS.POTENTIAL)   // L
-  const recommendationCol = getColumnIndex(HISTORY_COLUMNS.RECOMMENDATION) // M
+  const recommendationCol = getColumnIndex(HISTORY_COLUMNS.RECOMMENDATION) // J
   
   // ОПТИМИЗАЦИЯ: Читаем все данные одним batch-запросом
   const names = sheet.getRange(DATA_START_ROW, 2, count, 1).getValues() // B
-  const trends = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.TREND), count, 1).getValues() // I (теперь содержит объединенный тренд+дни)
+  const trends = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.TREND), count, 1).getValues() // M (теперь содержит объединенный тренд+дни)
   const phases = sheet.getRange(DATA_START_ROW, phaseCol, count, 1).getValues()
   const potentials = sheet.getRange(DATA_START_ROW, potentialCol, count, 1).getValues()
   const recommendations = sheet.getRange(DATA_START_ROW, recommendationCol, count, 1).getValues()
+  const investmentScores = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.INVESTMENT_SCORE), count, 1).getValues() // I
   
   // ОПТИМИЗАЦИЯ: Читаем все цены и заголовки колонок одним batch-запросом
   const priceDataWidth = lastCol >= firstDateCol ? lastCol - firstDateCol + 1 : 0
@@ -1268,11 +1283,23 @@ function history_updateTrends() {
       const cleanTrend = trendMatch ? trendMatch[1] : '🟪'
       const daysChange = daysMatch ? parseInt(daysMatch[1], 10) : 0
       
+      // Получаем Investment Score из колонки I (если доступен)
+      const investmentScoreStr = String(investmentScores[i][0] || '').trim()
+      let investmentScore = null
+      if (investmentScoreStr && investmentScoreStr !== '—') {
+        // Парсим число из формата "🟩 0.93"
+        const scoreMatch = investmentScoreStr.match(/(\d+\.?\d*)/)
+        if (scoreMatch) {
+          investmentScore = parseFloat(scoreMatch[1])
+        }
+      }
+      
       recommendations[i][0] = history_generateRecommendation_(
         phases[i][0],
         cleanTrend,
         potential,
-        daysChange
+        daysChange,
+        investmentScore
       )
     } else {
       phases[i][0] = '❓'
@@ -1306,16 +1333,16 @@ function history_updateTrends() {
   }
 }
 
-// Убедиться что колонки для расширенной аналитики существуют (K, L, M)
+// Убедиться что колонки для расширенной аналитики существуют (K, L, J)
 function history_ensureExtendedAnalyticsColumns_() {
   const sheet = getOrCreateHistorySheet_()
   const lastRow = sheet.getLastRow()
   
-  // Колонки K, L, M зарезервированы для Фаза, Потенциал, Рекомендация
+  // Колонки K, L, J зарезервированы для Фаза, Потенциал, Рекомендация
   // Проверяем заголовки
-  const phaseCol = getColumnIndex(HISTORY_COLUMNS.PHASE)
-  const potentialCol = getColumnIndex(HISTORY_COLUMNS.POTENTIAL)
-  const recommendationCol = getColumnIndex(HISTORY_COLUMNS.RECOMMENDATION)
+  const phaseCol = getColumnIndex(HISTORY_COLUMNS.PHASE)           // K
+  const potentialCol = getColumnIndex(HISTORY_COLUMNS.POTENTIAL)   // L
+  const recommendationCol = getColumnIndex(HISTORY_COLUMNS.RECOMMENDATION) // J
   
   const phaseHeader = sheet.getRange(HEADER_ROW, phaseCol).getValue()
   const potentialHeader = sheet.getRange(HEADER_ROW, potentialCol).getValue()
@@ -1428,7 +1455,22 @@ function history_calculateGrowthPotential_(prices) {
 }
 
 // Генерация рекомендации на основе анализа
-function history_generateRecommendation_(phase, trend, potential, daysChange) {
+function history_generateRecommendation_(phase, trend, potential, daysChange, investmentScore = null, heroTrend = null) {
+  // Если есть Investment Score, используем его
+  if (investmentScore !== null && typeof investmentScore === 'number' && !isNaN(investmentScore)) {
+    if (investmentScore >= 0.75) {
+      return `🟩 КУПИТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+    }
+    if (investmentScore >= 0.60) {
+      return `🟨 ДЕРЖАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+    }
+    if (investmentScore < 0.40) {
+      return `🟥 ПРОДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+    }
+    return `👀 НАБЛЮДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+  }
+  
+  // Fallback на старую логику, если Investment Score не рассчитан
   if (!potential) return '👀 НАБЛЮДАТЬ'
   
   // Используем to85th для более реалистичных рекомендаций
@@ -1461,4 +1503,194 @@ function history_generateRecommendation_(phase, trend, potential, daysChange) {
   }
   
   return '👀 НАБЛЮДАТЬ'
+}
+
+// ===== СИСТЕМА ИНВЕСТИЦИОННЫХ РЕКОМЕНДАЦИЙ =====
+
+/**
+ * Синхронизация статистики героев из HeroStats в History
+ * Обновляет колонки O-T (Hero Trend, Contest Rate Change, Contest Rate, Pick Rate, Win Rate, Hero Name)
+ */
+function history_syncHeroStats() {
+  const sheet = getOrCreateHistorySheet_()
+  const lastRow = sheet.getLastRow()
+  if (lastRow < DATA_START_ROW) return
+  
+  const mappings = heroMapping_getAllMappings()
+  const itemNames = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
+  
+  // Получаем все маппинги для оптимизации
+  const heroDataMap = {}
+  for (const itemName of Object.keys(mappings)) {
+    const mapping = mappings[itemName]
+    if (mapping.heroId && mapping.category === 'Hero Item') {
+      if (!heroDataMap[mapping.heroId]) {
+        heroDataMap[mapping.heroId] = {}
+      }
+      // Приоритет: High Rank > All Ranks
+      const highRankStats = heroStats_getLatestStats(mapping.heroId, 'High Rank')
+      const allRanksStats = heroStats_getLatestStats(mapping.heroId, 'All Ranks')
+      heroDataMap[mapping.heroId].stats = highRankStats || allRanksStats
+      heroDataMap[mapping.heroId].rankCategory = highRankStats ? 'High Rank' : 'All Ranks'
+      heroDataMap[mapping.heroId].heroName = mapping.heroName
+    }
+  }
+  
+  // Обновляем колонки для каждой строки
+  for (let i = 0; i < itemNames.length; i++) {
+    const itemName = String(itemNames[i][0] || '').trim()
+    if (!itemName) continue
+    
+    const row = DATA_START_ROW + i
+    const mapping = mappings[itemName]
+    
+    if (mapping && mapping.heroId && mapping.category === 'Hero Item') {
+      const heroData = heroDataMap[mapping.heroId]
+      if (heroData && heroData.stats) {
+        try {
+          const stats = typeof heroData.stats === 'string' ? JSON.parse(heroData.stats) : heroData.stats
+          
+          // Обновляем колонки
+          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.HERO_NAME)).setValue(heroData.heroName || '')
+          // Рассчитываем Hero Trend Score (передаем объект с ключом rankCategory)
+          const heroStatsObj = {[heroData.rankCategory]: heroData.stats}
+          const heroTrendScore = analytics_calculateHeroTrendScore(mapping.heroId, heroData.rankCategory, heroStatsObj)
+          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.HERO_TREND)).setValue(analytics_formatScore(heroTrendScore))
+          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CHANGE_7D)).setValue(stats.contestRateChange7d || 0)
+          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CURRENT)).setValue(stats.contestRate || 0)
+          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CURRENT)).setValue(stats.pickRate || 0)
+          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)).setValue(stats.winRate || 0)
+        } catch (e) {
+          console.log(`Ошибка при обновлении статистики для ${itemName}: ${e.message}`)
+        }
+      }
+    } else {
+      // Общий предмет - очищаем колонки
+      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.HERO_NAME)).setValue('')
+      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.HERO_TREND)).setValue('')
+      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CHANGE_7D)).setValue('')
+      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CURRENT)).setValue('')
+      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CURRENT)).setValue('')
+      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)).setValue('')
+    }
+  }
+}
+
+/**
+ * Обновление колонок статистики героев (M-R)
+ * Алиас для history_syncHeroStats()
+ */
+function history_updateHeroStatsColumns() {
+  history_syncHeroStats()
+}
+
+/**
+ * Расчет Investment Score для всех предметов в History
+ */
+function history_updateInvestmentScores() {
+  const sheet = getOrCreateHistorySheet_()
+  const lastRow = sheet.getLastRow()
+  if (lastRow < DATA_START_ROW) return
+  
+  const mappings = heroMapping_getAllMappings()
+  const itemNames = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
+  
+  // Получаем данные из SteamWebAPI для всех предметов (batch)
+  const itemNamesList = itemNames.map(row => String(row[0] || '').trim()).filter(name => name)
+  const itemsData = {}
+  
+  // Batch запросы (до 50 предметов за раз)
+  const batchSize = API_CONFIG.STEAM_WEB_API.MAX_ITEMS_PER_REQUEST
+  for (let i = 0; i < itemNamesList.length; i += batchSize) {
+    const batch = itemNamesList.slice(i, i + batchSize)
+    const result = steamWebAPI_fetchItems(batch, 'dota2')
+    if (result.ok && result.items) {
+      result.items.forEach(item => {
+        if (item.marketname) {
+          itemsData[item.marketname] = item
+        }
+      })
+    }
+    // Задержка между batch запросами
+    if (i + batchSize < itemNamesList.length) {
+      Utilities.sleep(500)
+    }
+  }
+  
+  // Обновляем Investment Score для каждой строки
+  for (let i = 0; i < itemNames.length; i++) {
+    const itemName = String(itemNames[i][0] || '').trim()
+    if (!itemName) continue
+    
+    const row = DATA_START_ROW + i
+    const mapping = mappings[itemName]
+    const itemData = itemsData[itemName]
+    
+    if (!itemData) continue
+    
+    // Получаем историю цен для предмета
+    const historyData = history_getPriceHistoryForItem_(sheet, row)
+    
+    // Определяем категорию и heroId
+    const category = mapping ? mapping.category : 'Common Item'
+    const heroId = mapping && mapping.heroId ? mapping.heroId : null
+    const rankCategory = mapping && mapping.heroId ? 'High Rank' : null // Приоритет High Rank
+    
+    // Получаем статистику героя
+    let heroStats = null
+    if (heroId && rankCategory) {
+      const latestStats = heroStats_getLatestStats(heroId, rankCategory)
+      if (latestStats) {
+        heroStats = {[rankCategory]: latestStats}
+      }
+    }
+    
+    // Рассчитываем Investment Score
+    const investmentScore = analytics_calculateInvestmentScore(
+      itemData,
+      heroStats,
+      historyData,
+      category,
+      heroId,
+      rankCategory
+    )
+    
+    // Обновляем колонку Investment Score
+    sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.INVESTMENT_SCORE))
+      .setValue(analytics_formatScore(investmentScore))
+  }
+}
+
+/**
+ * Получение истории цен для предмета из History
+ * @param {Sheet} sheet - Лист History
+ * @param {number} row - Номер строки
+ * @returns {Object} {prices: Array<number>, dates: Array<Date>}
+ */
+function history_getPriceHistoryForItem_(sheet, row) {
+  const prices = []
+  const dates = []
+  
+  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
+  const lastCol = sheet.getLastColumn()
+  
+  for (let col = firstDateCol; col <= lastCol; col++) {
+    const header = sheet.getRange(HEADER_ROW, col).getValue()
+    const price = sheet.getRange(row, col).getValue()
+    
+    if (price && typeof price === 'number' && price > 0) {
+      prices.push(price)
+      
+      // Парсим дату из заголовка
+      const dateMatch = String(header).match(/(\d{2})\.(\d{2})\.(\d{2})/)
+      if (dateMatch) {
+        const day = parseInt(dateMatch[1])
+        const month = parseInt(dateMatch[2]) - 1
+        const year = 2000 + parseInt(dateMatch[3])
+        dates.push(new Date(year, month, day, 12, 0, 0)) // Полдень для точности
+      }
+    }
+  }
+  
+  return { prices, dates }
 }

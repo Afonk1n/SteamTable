@@ -184,6 +184,7 @@ const COLUMN_WIDTHS = {
 // Идентификаторы колонок для Invest
 // УДАЛЕНЫ: H (Текущая стоимость без комиссии), K (Прибыль % без комиссии)
 // ОСТАВЛЕНЫ: только колонки с учетом комиссии
+// НОВАЯ СТРУКТУРА: L - Min, M - Max, N - Investment Score, O - Рекомендация, P - Фаза, Q - Потенциал, R - Тренд, S - Дней смены, T-W - Метрики, X - Risk Level, Y-Z - Чекбоксы
 const INVEST_COLUMNS = {
   IMAGE: 'A',
   NAME: 'B',
@@ -198,31 +199,50 @@ const INVEST_COLUMNS = {
   LINK: 'K',                      // Было M, стало K
   MIN_PRICE: 'L',                 // Было N, стало L
   MAX_PRICE: 'M',                 // Было O, стало M
-  TREND: 'N',                     // Было P, стало N (объединенный формат: "🟥 Падает 35 дн.")
-  PHASE: 'O',                     // Было R, стало O (убрали DAYS_CHANGE)
-  POTENTIAL: 'P',                 // Было S, стало P
-  RECOMMENDATION: 'Q',            // Было T, стало Q
-  SELL_CHECKBOX: 'R'              // Было U, стало R
+  INVESTMENT_SCORE: 'N',  // НОВАЯ: Investment Score (после Max)
+  RECOMMENDATION: 'O',  // Перемещено из Q
+  PHASE: 'P',  // Перемещено из O
+  POTENTIAL: 'Q',  // Перемещено из P
+  TREND: 'R',  // Перемещено из N
+  DAYS_CHANGE: 'S',  // НОВАЯ: Дней смены
+  HERO_TREND: 'T',  // НОВАЯ: Hero Trend
+  VOLATILITY_INDEX: 'U',  // НОВАЯ: Volatility Index
+  DEMAND_RATIO: 'V',  // НОВАЯ: Demand Ratio
+  PRICE_MOMENTUM: 'W',  // НОВАЯ: Price Momentum
+  SALES_TREND: 'X',  // НОВАЯ: Sales Trend
+  LIQUIDITY_SCORE: 'Y',  // НОВАЯ: Liquidity Score
+  RISK_LEVEL: 'Z',  // НОВАЯ: Risk Level
+  BUY_CHECKBOX: 'AA',  // НОВАЯ: Купить? (перемещено из R)
+  SELL_CHECKBOX: 'AB'  // НОВАЯ: Продать? (перемещено из R)
 }
 
 // Идентификаторы колонок для Sales
+// НОВАЯ СТРУКТУРА: K - Buyback Score, L - Рекомендация, M - Hero Trend, N-R - Метрики, S - Risk Level
 const SALES_COLUMNS = {
   IMAGE: 'A',
   NAME: 'B',
-  SELL_PRICE: 'C',
-  CURRENT_PRICE: 'D',
-  PRICE_DROP: 'E',
-  LINK: 'F',
-  MIN_PRICE: 'G',
-  MAX_PRICE: 'H',
-  TREND: 'I',  // Объединенный формат: "🟥 Падает 35 дн." (убрали DAYS_CHANGE)
-  PHASE: 'J',  // Было K, стало J
-  POTENTIAL: 'K',  // Было L, стало K
-  RECOMMENDATION: 'L'  // Было M, стало L
+  QUANTITY: 'C',  // НОВАЯ: Количество
+  SELL_PRICE: 'D',  // Было C, стало D
+  CURRENT_PRICE: 'E',  // Было D, стало E
+  PRICE_DROP: 'F',  // Было E, стало F
+  PRICE_DROP_PERCENT: 'G',  // НОВАЯ: Процент просадки
+  LINK: 'H',  // Было F, стало H
+  MIN_PRICE: 'I',  // Было G, стало I
+  MAX_PRICE: 'J',  // Было H, стало J
+  BUYBACK_SCORE: 'K',  // НОВАЯ: Buyback Score (после Max)
+  RECOMMENDATION: 'L',  // Перемещено из L
+  HERO_TREND: 'M',  // НОВАЯ: Hero Trend
+  VOLATILITY_INDEX: 'N',  // НОВАЯ: Volatility Index
+  DEMAND_RATIO: 'O',  // НОВАЯ: Demand Ratio
+  PRICE_MOMENTUM: 'P',  // НОВАЯ: Price Momentum
+  SALES_TREND: 'Q',  // НОВАЯ: Sales Trend
+  LIQUIDITY_SCORE: 'R',  // НОВАЯ: Liquidity Score
+  RISK_LEVEL: 'S'  // НОВАЯ: Risk Level
 }
 
 // Идентификаторы колонок для History
-// ОБЪЕДИНЕНЫ: TREND и DAYS_CHANGE в одну колонку I (Тренд) с форматом "🟥 Падает 35 дн."
+// ОБЪЕДИНЕНЫ: TREND и DAYS_CHANGE в одну колонку M (Тренд) с форматом "🟥 Падает 35 дн."
+// НОВАЯ СТРУКТУРА: G - Min, H - Max, I - Investment Score, J - Рекомендация, K - Фаза, L - Потенциал, M - Тренд, N - Дней смены, O-R - Hero Stats
 const HISTORY_COLUMNS = {
   IMAGE: 'A',
   NAME: 'B',
@@ -232,12 +252,20 @@ const HISTORY_COLUMNS = {
   CURRENT_PRICE: 'F',
   MIN_PRICE: 'G',
   MAX_PRICE: 'H',
-  TREND: 'I',  // Объединенный формат: "🟥 Падает 35 дн." (было I + J)
-  PHASE: 'J',  // Было K, стало J
-  POTENTIAL: 'K',  // Было L, стало K
-  RECOMMENDATION: 'L',  // Было M, стало L
-  // Даты начинаются с M (колонка 13, было 14)
-  FIRST_DATE_COL: 13
+  INVESTMENT_SCORE: 'I',  // НОВАЯ: Investment Score (после Max)
+  RECOMMENDATION: 'J',  // Перемещено из L
+  PHASE: 'K',  // Перемещено из J
+  POTENTIAL: 'L',  // Перемещено из K
+  TREND: 'M',  // Перемещено из I, объединенный формат: "🟥 Падает 35 дн."
+  DAYS_CHANGE: 'N',  // НОВАЯ: Дней смены
+  HERO_TREND: 'O',  // НОВАЯ: Hero Trend
+  CONTEST_RATE_CHANGE_7D: 'P',  // НОВАЯ: Contest Rate Change (7d)
+  CONTEST_RATE_CURRENT: 'Q',  // НОВАЯ: Contest Rate (current)
+  PICK_RATE_CURRENT: 'R',  // НОВАЯ: Pick Rate (current)
+  WIN_RATE_CURRENT: 'S',  // НОВАЯ: Win Rate (current)
+  HERO_NAME: 'T',  // НОВАЯ: Hero Name
+  // Даты начинаются с U (колонка 21)
+  FIRST_DATE_COL: 21
 }
 
 // Заголовки по умолчанию
@@ -256,26 +284,43 @@ const HEADERS = {
     'Ссылка',
     'Min',
     'Max',
-    'Тренд',  // Объединенный формат: "🟥 Падает 35 дн." (убрали "Дней смены")
+    'Investment Score',
+    'Рекомендация',
     'Фаза',
     'Потенциал (P85)',
-    'Рекомендация',
-    'Продать'
+    'Тренд',
+    'Дней смены',
+    'Hero Trend',
+    'Volatility Index',
+    'Demand Ratio',
+    'Price Momentum',
+    'Sales Trend',
+    'Liquidity Score',
+    'Risk Level',
+    'Купить?',
+    'Продать?'
   ],
   
   SALES: [
     'Изображение',
     'Название',
+    'Количество',
     'Цена продажи',
     'Текущая цена',
-    'Процент просадки',
+    'Просадка',
+    'Просадка %',
     'Ссылка',
     'Min',
     'Max',
-    'Тренд',  // Объединенный формат: "🟥 Падает 35 дн." (убрали "Дней смены")
-    'Фаза',
-    'Потенциал (P85)',
-    'Рекомендация'
+    'Buyback Score',
+    'Рекомендация',
+    'Hero Trend',
+    'Volatility Index',
+    'Demand Ratio',
+    'Price Momentum',
+    'Sales Trend',
+    'Liquidity Score',
+    'Risk Level'
   ],
   
   HISTORY: [
@@ -287,11 +332,19 @@ const HEADERS = {
     'Текущая цена',
     'Min',
     'Max',
-    'Тренд',  // Объединенный формат: "🟥 Падает 35 дн." (было I + J)
+    'Investment Score',
+    'Рекомендация',
     'Фаза',
     'Потенциал (P85)',
-    'Рекомендация'
-    // Даты добавляются динамически с колонки M (было N)
+    'Тренд',
+    'Дней смены',
+    'Hero Trend',
+    'Contest Rate Change (7d)',
+    'Contest Rate (current)',
+    'Pick Rate (current)',
+    'Win Rate (current)',
+    'Hero Name'
+    // Даты добавляются динамически с колонки U (21)
   ],
   
   HERO_STATS: [
@@ -309,6 +362,42 @@ const HEADERS = {
     'Auto-detected',
     'Category'
   ]
+}
+
+// Веса для расчета скоров (Analytics)
+const ANALYTICS_WEIGHTS = {
+  INVESTMENT_SCORE: {
+    HERO_TREND: 0.35,
+    VOLATILITY: 0.20,
+    DEMAND_RATIO: 0.20,
+    PRICE_MOMENTUM: 0.15,
+    LIQUIDITY: 0.05,
+    SALES_TREND: 0.05
+  },
+  BUYBACK_SCORE: {
+    PRICE_DROP: 0.35,
+    VOLATILITY: 0.25,
+    HERO_TREND: 0.20,
+    DEMAND_RATIO: 0.10,
+    PRICE_MOMENTUM: 0.05,
+    LIQUIDITY: 0.05
+  },
+  HERO_TREND_SCORE: {
+    CONTEST_RATE_CHANGE: 0.40,
+    PRO_CONTEST_RATE_CHANGE: 0.20,
+    PICK_RATE: 0.25,
+    BAN_RATE: 0.10,
+    WIN_RATE: 0.05
+  }
+}
+
+// Пороги для критических сигналов
+const ANALYTICS_THRESHOLDS = {
+  INVESTMENT_SCORE_CRITICAL: 0.75,
+  BUYBACK_SCORE_CRITICAL: 0.75,
+  HERO_CHANGE_24H: 0.15,      // 15% за 24 часа
+  HERO_CHANGE_7D: 0.10,        // 10% за 7 дней
+  PRICE_CHANGE_24H: 0.20       // 20% за 24 часа
 }
 
 // Идентификаторы колонок для HeroStats
