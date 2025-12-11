@@ -7,21 +7,60 @@ function parseLocalizedPrice_(raw) {
   return Number.isFinite(price) ? { ok: true, price } : { ok: false, error: 'nan' }
 }
 
+/**
+ * Получает минимальную цену предмета с приоритетом SteamWebAPI.ru и fallback на priceoverview
+ * @param {number} appid - ID приложения Steam (570 для Dota 2)
+ * @param {string} itemName - Название предмета
+ * @returns {Object} {ok: boolean, price?: number, error?: string, source?: string}
+ */
 function fetchLowestPrice_(appid, itemName) {
   const name = String(itemName || '').trim()
   if (!name) return { ok: false, error: 'empty_name' }
+  
+  // Пробуем сначала SteamWebAPI.ru (более надежный источник)
+  try {
+    const itemData = steamWebAPI_getItemData(name, 'dota2')
+    if (itemData && itemData.ok && itemData.price && itemData.price > 0) {
+      return {
+        ok: true,
+        price: itemData.price,
+        source: 'steamwebapi'
+      }
+    }
+  } catch (e) {
+    console.warn(`SteamWebAPI failed for "${name}", falling back to priceoverview:`, e.message)
+  }
+  
+  // Fallback на старый метод (priceoverview)
+  return fetchLowestPrice_legacy_(appid, name)
+}
+
+/**
+ * Старый метод получения цены через priceoverview (fallback)
+ * @param {number} appid - ID приложения Steam
+ * @param {string} itemName - Название предмета
+ * @returns {Object} {ok: boolean, price?: number, error?: string, source?: string}
+ */
+function fetchLowestPrice_legacy_(appid, itemName) {
+  const name = String(itemName || '').trim()
+  if (!name) return { ok: false, error: 'empty_name' }
+  
   const url = `https://steamcommunity.com/market/priceoverview/?currency=5&appid=${appid}&market_hash_name=${encodeURIComponent(name)}`
   try {
     const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true })
-    if (response.getResponseCode() !== 200) return { ok: false, error: 'http_' + response.getResponseCode() }
+    if (response.getResponseCode() !== 200) {
+      return { ok: false, error: 'http_' + response.getResponseCode(), source: 'priceoverview' }
+    }
     const data = JSON.parse(response.getContentText())
     if (data && data.success && data.lowest_price) {
       const parsed = parseLocalizedPrice_(data.lowest_price)
-      return parsed.ok ? { ok: true, price: parsed.price } : { ok: false, error: parsed.error }
+      return parsed.ok 
+        ? { ok: true, price: parsed.price, source: 'priceoverview' } 
+        : { ok: false, error: parsed.error, source: 'priceoverview' }
     }
-    return { ok: false, error: 'no_data' }
+    return { ok: false, error: 'no_data', source: 'priceoverview' }
   } catch (e) {
-    return { ok: false, error: 'exception' }
+    return { ok: false, error: 'exception', source: 'priceoverview', details: e.message }
   }
 }
 

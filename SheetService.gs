@@ -77,6 +77,90 @@ function getOrCreateHistorySheet_() {
 }
 
 /**
+ * Получает лист PortfolioStats
+ * @returns {Sheet|null} Лист PortfolioStats или null
+ */
+function getPortfolioStatsSheet_() {
+  return getSheet_(SHEET_NAMES.PORTFOLIO_STATS)
+}
+
+/**
+ * Получает или создает лист PortfolioStats
+ * @returns {Sheet} Лист PortfolioStats
+ */
+function getOrCreatePortfolioStatsSheet_() {
+  return getOrCreateSheet_(SHEET_NAMES.PORTFOLIO_STATS)
+}
+
+/**
+ * Получает лист AutoLog
+ * @returns {Sheet|null} Лист AutoLog или null
+ */
+function getAutoLogSheet_() {
+  return getSheet_(SHEET_NAMES.AUTO_LOG)
+}
+
+/**
+ * Получает или создает лист AutoLog
+ * @returns {Sheet} Лист AutoLog
+ */
+function getOrCreateAutoLogSheet_() {
+  const headers = ['Дата/Время', 'Лист', 'Действие', 'Результат']
+  const columnWidths = [150, 100, 200, 100]
+  return createLogSheet_(SHEET_NAMES.AUTO_LOG, headers, columnWidths)
+}
+
+/**
+ * Получает лист Log
+ * @returns {Sheet|null} Лист Log или null
+ */
+function getLogSheet_() {
+  return getSheet_(SHEET_NAMES.LOG)
+}
+
+/**
+ * Получает или создает лист Log
+ * @returns {Sheet} Лист Log
+ */
+function getOrCreateLogSheet_() {
+  const headers = ['Дата/Время', 'Операция', 'Предмет', 'Количество', 'Цена', 'Сумма', 'Источник']
+  const columnWidths = [150, 100, 200, 100, 100, 100, 100]
+  return createLogSheet_(SHEET_NAMES.LOG, headers, columnWidths)
+}
+
+/**
+ * Получает лист HeroStats
+ * @returns {Sheet|null} Лист HeroStats или null
+ */
+function getHeroStatsSheet_() {
+  return getSheet_(SHEET_NAMES.HERO_STATS)
+}
+
+/**
+ * Получает или создает лист HeroStats
+ * @returns {Sheet} Лист HeroStats
+ */
+function getOrCreateHeroStatsSheet_() {
+  return getOrCreateSheet_(SHEET_NAMES.HERO_STATS)
+}
+
+/**
+ * Получает лист HeroMapping
+ * @returns {Sheet|null} Лист HeroMapping или null
+ */
+function getHeroMappingSheet_() {
+  return getSheet_(SHEET_NAMES.HERO_MAPPING)
+}
+
+/**
+ * Получает или создает лист HeroMapping
+ * @returns {Sheet} Лист HeroMapping
+ */
+function getOrCreateHeroMappingSheet_() {
+  return getOrCreateSheet_(SHEET_NAMES.HERO_MAPPING)
+}
+
+/**
  * Универсальная функция для создания и настройки листа лога
  * @param {string} sheetName - Имя листа
  * @param {Array<string>} headers - Массив заголовков колонок

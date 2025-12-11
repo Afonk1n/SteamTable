@@ -9,7 +9,9 @@ const SHEET_NAMES = {
   HISTORY: 'History',
   AUTO_LOG: 'AutoLog',
   LOG: 'Log',
-  PORTFOLIO_STATS: 'PortfolioStats'
+  PORTFOLIO_STATS: 'PortfolioStats',
+  HERO_STATS: 'HeroStats',
+  HERO_MAPPING: 'HeroMapping'
 }
 
 // Базовые параметры
@@ -85,6 +87,37 @@ const LIMITS = {
   BETWEEN_ITEMS_MS: 150,   // Задержка между предметами
   LOCK_TIMEOUT_SEC: 300    // Таймаут блокировки (5 минут)
 }
+
+// API конфигурация
+const API_CONFIG = {
+  STRATZ: {
+    BASE_URL: 'https://api.stratz.com/graphql',
+    TIMEOUT_MS: 30000,
+    MAX_RETRIES: 3,
+    RETRY_DELAY_MS: 1000
+  },
+  STEAM_WEB_API: {
+    BASE_URL: 'https://steamwebapi.ru',
+    TIMEOUT_MS: 30000,
+    MAX_RETRIES: 3,
+    RETRY_DELAY_MS: 500,
+    MAX_ITEMS_PER_REQUEST: 50
+  },
+  STEAM_PRICE_HISTORY: {
+    BASE_URL: 'https://steamcommunity.com/market/pricehistory',
+    TIMEOUT_MS: 10000 // 10 секунд таймаут для pricehistory
+  }
+}
+
+// Периодичность обновления статистики героев (конфигурируемая)
+const HERO_STATS_UPDATE_SCHEDULE = {
+  ENABLED: true,
+  TIMES_PER_DAY: 3,  // Утро, день, вечер
+  HOURS: [8, 14, 20]  // 08:00, 14:00, 20:00
+}
+
+// Хранение истории HeroStats (в днях)
+const HERO_STATS_HISTORY_DAYS = 90
 
 // Конфигурация анализа трендов (адаптирована под Dota 2 волатильность ±10-30%)
 const TREND_ANALYSIS_CONFIG = {
@@ -252,6 +285,41 @@ const HEADERS = {
     'Потенциал (P85)',
     'Рекомендация'
     // Даты добавляются динамически с колонки M (было N)
+  ],
+  
+  HERO_STATS: [
+    'Hero ID',
+    'Hero Name',
+    'Rank Category'
+    // Даты/время добавляются динамически с колонки D
+  ],
+  
+  HERO_MAPPING: [
+    'Item Name',
+    'Hero Name',
+    'Hero ID',
+    'Auto-detected',
+    'Verified',
+    'Category'
   ]
+}
+
+// Идентификаторы колонок для HeroStats
+const HERO_STATS_COLUMNS = {
+  HERO_ID: 'A',
+  HERO_NAME: 'B',
+  RANK_CATEGORY: 'C',
+  // Динамические колонки начинаются с D (колонка 4)
+  FIRST_DATA_COL: 4
+}
+
+// Идентификаторы колонок для HeroMapping
+const HERO_MAPPING_COLUMNS = {
+  ITEM_NAME: 'A',
+  HERO_NAME: 'B',
+  HERO_ID: 'C',
+  AUTO_DETECTED: 'D',
+  VERIFIED: 'E',
+  CATEGORY: 'F'
 }
 

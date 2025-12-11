@@ -230,6 +230,8 @@ function telegram_checkPriceTargets() {
   const profits = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PROFIT), count, 1).getValues()
   const profitPercents = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PROFIT_AFTER_FEE), count, 1).getValues()
   const recommendations = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), count, 1).getValues()
+  const potentials = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.POTENTIAL), count, 1).getValues()
+  const maxPrices = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.MAX_PRICE), count, 1).getValues()
   
   let notificationsSent = 0
   
@@ -243,8 +245,29 @@ function telegram_checkPriceTargets() {
     const profit = Number(profits[i][0]) || 0
     const profitPercent = Number(profitPercents[i][0]) || 0
     const recommendation = String(recommendations[i][0] || '').trim()
+    const potential = Number(potentials[i][0]) || null
+    const maxPrice = Number(maxPrices[i][0]) || null
     
     if (goal <= 0 || currentPrice <= 0) continue
+    
+    // Формируем информацию о потенциале
+    // Потенциал P85 хранится как доля (0.5 = 50%) - это реалистичная оценка (85-й перцентиль)
+    // Это основной потенциал, на который можно рассчитывать
+    // Максимум показываем как дополнительную информацию (теоретический максимум, который может не достичь)
+    let potentialInfo = ''
+    if (potential !== null && !isNaN(potential)) {
+      const potentialPercent = potential * 100 // Преобразуем в проценты для отображения
+      const potentialPrice = currentPrice * (1 + potential) // Цена при достижении P85
+      potentialInfo = `\nПотенциал роста (P85): <b>+${potentialPercent.toFixed(1)}%</b> (до ~${potentialPrice.toFixed(2)} ₽)`
+      
+      // Показываем теоретический максимум как дополнительную информацию
+      // maxPrice - это максимум из всей истории предмета (не локально зафиксированная цена)
+      // ВАЖНО: это теоретический максимум, возврат к нему не гарантирован
+      if (maxPrice && maxPrice > currentPrice) {
+        const potentialToMax = ((maxPrice - currentPrice) / currentPrice) * 100
+        potentialInfo += `\nТеоретический максимум: +${potentialToMax.toFixed(1)}% (${maxPrice.toFixed(2)} ₽)`
+      }
+    }
     
     // Проверка достижения цели
     if (currentPrice >= goal) {
@@ -252,7 +275,8 @@ function telegram_checkPriceTargets() {
         `Предмет: <b>${name}</b>\n` +
         `Текущая цена: ${currentPrice.toFixed(2)} ₽\n` +
         `Цель: ${goal.toFixed(2)} ₽\n` +
-        `Прибыль: ${profit.toFixed(2)} ₽ (${(profitPercent * 100).toFixed(2)}%)\n\n` +
+        `Прибыль: ${profit.toFixed(2)} ₽ (${(profitPercent * 100).toFixed(2)}%)` +
+        potentialInfo + `\n\n` +
         `Рекомендация: ${recommendation}`
       
       const result = telegram_sendMessage(message)
@@ -269,7 +293,8 @@ function telegram_checkPriceTargets() {
         `Предмет: <b>${name}</b>\n` +
         `Текущая цена: ${currentPrice.toFixed(2)} ₽\n` +
         `Цель: ${goal.toFixed(2)} ₽\n` +
-        `Просадка: ${dropPercent.toFixed(2)}%\n\n` +
+        `Просадка: ${dropPercent.toFixed(2)}%` +
+        potentialInfo + `\n\n` +
         `Рекомендация: 🟩 КУПИТЬ`
       
       const result = telegram_sendMessage(message)
@@ -346,6 +371,9 @@ function telegram_checkDailyPriceTargets() {
     const goal = Number(goals[i][0]) || 0
     const profit = Number(profits[i][0]) || 0
     const profitPercent = Number(profitPercents[i][0]) || 0
+    const potential = Number(potentials[i][0]) || null
+    const maxPrice = Number(maxPrices[i][0]) || null
+    const recommendation = String(recommendations[i][0] || '').trim()
     
     if (goal <= 0 || currentPrice <= 0) continue
     
@@ -356,7 +384,10 @@ function telegram_checkDailyPriceTargets() {
         currentPrice,
         goal,
         profit,
-        profitPercent
+        profitPercent,
+        potential,
+        maxPrice,
+        recommendation
       })
     }
     
@@ -367,7 +398,10 @@ function telegram_checkDailyPriceTargets() {
         name,
         currentPrice,
         goal,
-        dropPercent
+        dropPercent,
+        potential,
+        maxPrice,
+        recommendation
       })
     }
   }
@@ -390,7 +424,29 @@ function telegram_checkDailyPriceTargets() {
       const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(item.name)}`
       message += `${index + 1}. <b><a href="${itemUrl}">${item.name}</a></b>\n`
       message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (цель: ${item.goal.toFixed(2)} ₽)\n`
-      message += `   Прибыль: ${item.profit.toFixed(2)} ₽ (${(item.profitPercent * 100).toFixed(2)}%)\n\n`
+      message += `   Прибыль: ${item.profit.toFixed(2)} ₽ (${(item.profitPercent * 100).toFixed(2)}%)\n`
+      
+      // Добавляем информацию о потенциале
+      // Потенциал P85 - это реалистичная оценка (85-й перцентиль всех цен) - основной потенциал
+      // maxPrice - теоретический максимум из всей истории (дополнительная информация)
+      if (item.potential !== null && !isNaN(item.potential)) {
+        const potentialPercent = item.potential * 100
+        const potentialPrice = item.currentPrice * (1 + item.potential)
+        message += `   Потенциал (P85): <b>+${potentialPercent.toFixed(1)}%</b> (до ~${potentialPrice.toFixed(2)} ₽)`
+        
+        // Теоретический максимум как дополнительная информация
+        // ВАЖНО: возврат к максимуму не гарантирован, поэтому акцент на P85
+        if (item.maxPrice && item.maxPrice > item.currentPrice) {
+          const potentialToMax = ((item.maxPrice - item.currentPrice) / item.currentPrice) * 100
+          message += `\n   Теор. максимум: +${potentialToMax.toFixed(1)}% (${item.maxPrice.toFixed(2)} ₽)`
+        }
+        message += `\n`
+      }
+      
+      if (item.recommendation) {
+        message += `   ${item.recommendation}\n`
+      }
+      message += `\n`
     })
     
     message += `Всего: <b>${reachedGoal.length}</b> позиций`
@@ -413,7 +469,29 @@ function telegram_checkDailyPriceTargets() {
       const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(item.name)}`
       message += `${index + 1}. <b><a href="${itemUrl}">${item.name}</a></b>\n`
       message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (цель: ${item.goal.toFixed(2)} ₽)\n`
-      message += `   Просадка: ${item.dropPercent.toFixed(2)}%\n\n`
+      message += `   Просадка: ${item.dropPercent.toFixed(2)}%\n`
+      
+      // Добавляем информацию о потенциале
+      // Потенциал P85 - это реалистичная оценка (85-й перцентиль всех цен) - основной потенциал
+      // maxPrice - теоретический максимум из всей истории (дополнительная информация)
+      if (item.potential !== null && !isNaN(item.potential)) {
+        const potentialPercent = item.potential * 100
+        const potentialPrice = item.currentPrice * (1 + item.potential)
+        message += `   Потенциал (P85): <b>+${potentialPercent.toFixed(1)}%</b> (до ~${potentialPrice.toFixed(2)} ₽)`
+        
+        // Теоретический максимум как дополнительная информация
+        // ВАЖНО: возврат к максимуму не гарантирован, поэтому акцент на P85
+        if (item.maxPrice && item.maxPrice > item.currentPrice) {
+          const potentialToMax = ((item.maxPrice - item.currentPrice) / item.currentPrice) * 100
+          message += `\n   Теор. максимум: +${potentialToMax.toFixed(1)}% (${item.maxPrice.toFixed(2)} ₽)`
+        }
+        message += `\n`
+      }
+      
+      if (item.recommendation) {
+        message += `   ${item.recommendation}\n`
+      }
+      message += `\n`
     })
     
     message += `Всего: <b>${strongDrop.length}</b> позиций\n\n`
