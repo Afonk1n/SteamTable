@@ -100,7 +100,7 @@ function fetchLowestPrice_legacy_(appid, itemName) {
   const url = `https://steamcommunity.com/market/priceoverview/?currency=5&appid=${appid}&market_hash_name=${encodeURIComponent(name)}`
   try {
     const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true })
-    if (response.getResponseCode() !== 200) {
+    if (response.getResponseCode() !== HTTP_STATUS.OK) {
       return { ok: false, error: 'http_' + response.getResponseCode(), source: 'priceoverview' }
     }
     const data = JSON.parse(response.getContentText())
@@ -370,7 +370,7 @@ function history_createPeriodAndUpdate() {
   getOrCreateAutoLogSheet_()
   
   const lockKey = 'unified_price_update_lock'
-  const lockCheck = acquireLock_(lockKey, 600)
+  const lockCheck = acquireLock_(lockKey, LIMITS.LOCK_TIMEOUT_SEC)
   if (lockCheck.locked) {
     console.log(`Unified: пропуск - обновление уже выполняется`)
     return
@@ -422,12 +422,23 @@ function history_createPeriodAndUpdate() {
         logAutoAction_('Unified', 'Ошибка обновления трендов', 'ERROR')
       }
       
-      // Сохраняем историю портфеля (только после дневного сбора)
+      // Сохраняем историю портфеля и обновляем Investment Scores (только после дневного сбора)
       // Примечание: аналитика Invest/Sales уже обновлена в syncPricesFromHistoryToInvestAndSales()
       try {
         if (period === PRICE_COLLECTION_PERIODS.EVENING) {
           portfolioStats_saveHistory_()
           console.log(`Unified: история портфеля сохранена`)
+          
+          // Обновляем Investment Scores после завершения дневного сбора
+          try {
+            history_updateInvestmentScores()
+            invest_updateInvestmentScores()
+            sales_updateBuybackScores()
+            console.log(`Unified: Investment/Buyback Scores обновлены после дневного сбора`)
+          } catch (e) {
+            console.error('Unified: ошибка при обновлении Investment Scores:', e)
+            logAutoAction_('Unified', 'Ошибка обновления Investment Scores', 'ERROR')
+          }
         }
       } catch (e) {
         console.error('Unified: ошибка при сохранении истории портфеля:', e)
@@ -465,7 +476,7 @@ function unified_priceUpdate() {
   getOrCreateAutoLogSheet_()
   
   const lockKey = 'unified_price_update_lock'
-  const lockCheck = acquireLock_(lockKey, 600)
+  const lockCheck = acquireLock_(lockKey, LIMITS.LOCK_TIMEOUT_SEC)
   if (lockCheck.locked) {
     console.log(`Unified: пропуск - обновление уже выполняется`)
     return
@@ -502,12 +513,23 @@ function unified_priceUpdate() {
         logAutoAction_('Unified', 'Ошибка обновления трендов', 'ERROR')
       }
       
-      // Сохраняем историю портфеля (только после дневного сбора)
+      // Сохраняем историю портфеля и обновляем Investment Scores (только после дневного сбора)
       // Примечание: аналитика Invest/Sales уже обновлена в syncPricesFromHistoryToInvestAndSales()
       try {
         if (period === PRICE_COLLECTION_PERIODS.EVENING) {
           portfolioStats_saveHistory_()
           console.log(`Unified: история портфеля сохранена`)
+          
+          // Обновляем Investment Scores после завершения дневного сбора
+          try {
+            history_updateInvestmentScores()
+            invest_updateInvestmentScores()
+            sales_updateBuybackScores()
+            console.log(`Unified: Investment/Buyback Scores обновлены после дневного сбора`)
+          } catch (e) {
+            console.error('Unified: ошибка при обновлении Investment Scores:', e)
+            logAutoAction_('Unified', 'Ошибка обновления Investment Scores', 'ERROR')
+          }
         }
       } catch (e) {
         console.error('Unified: ошибка при сохранении истории портфеля:', e)
@@ -625,6 +647,29 @@ function getCurrentPriceFromHistoryData_(historyData) {
   return price
 }
 
+/**
+ * Универсальное обновление всех метрик для Invest и Sales
+ * Вызывает расчет метрик (Liquidity, Demand, Momentum, Sales Trend, Volatility, Hero Trend)
+ * для всех позиций в Invest и Sales
+ */
+function updateAllMetricsForInvestSales() {
+  try {
+    console.log('Utils: начало обновления метрик для Invest/Sales')
+    
+    // Обновляем метрики для Invest
+    invest_calculateAllMetrics()
+    console.log('Utils: метрики Invest обновлены')
+    
+    // Обновляем метрики для Sales
+    sales_calculateAllMetrics()
+    console.log('Utils: метрики Sales обновлены')
+    
+    console.log('Utils: обновление метрик завершено')
+  } catch (e) {
+    console.error('Utils: ошибка при обновлении метрик Invest/Sales:', e)
+  }
+}
+
 // Синхронизирует цены из History в Invest и Sales
 function syncPricesFromHistoryToInvestAndSales() {
   const historySheet = getHistorySheet_()
@@ -659,6 +704,14 @@ function syncPricesFromHistoryToInvestAndSales() {
     console.log(`Sync: аналитика в Invest/Sales и портфеля обновлена`)
   } catch (e) {
     console.error('Sync: ошибка при обновлении аналитики в Invest/Sales:', e)
+  }
+  
+  // Автоматический расчет метрик после синхронизации цен
+  try {
+    updateAllMetricsForInvestSales()
+    console.log('Sync: метрики Invest/Sales обновлены')
+  } catch (e) {
+    console.error('Sync: ошибка при обновлении метрик Invest/Sales:', e)
   }
 }
 
@@ -801,14 +854,14 @@ function fetchLowestPriceWithBackoff_(appid, itemName, options) {
   if (!name) return { ok: false, error: 'empty_name' }
   const {
     attempts = 1,  // Одна попытка на предмет
-    baseDelayMs = 200,
-    betweenItemsMs = 1000,  // 1 секунда между предметами
-    timeBudgetMs = 330000,
+    baseDelayMs = LIMITS.BASE_DELAY_MS,
+    betweenItemsMs = LIMITS.API_BETWEEN_ITEMS_MS,
+    timeBudgetMs = LIMITS.TIME_BUDGET_MS,
     startedAt = Date.now(),
   } = options || {}
 
   // Проверка бюджета времени перед началом
-  if (Date.now() - startedAt > timeBudgetMs - 5000) {
+    if (Date.now() - startedAt > timeBudgetMs - (LIMITS.SAFETY_BUFFER_MS * 5)) {
     return { ok: false, error: 'time_budget_low' }
   }
 
@@ -817,7 +870,7 @@ function fetchLowestPriceWithBackoff_(appid, itemName, options) {
   
   for (let attempt = 1; attempt <= attempts; attempt++) {
     // Проверка бюджета времени перед каждой попыткой
-    if (Date.now() - startedAt > timeBudgetMs - 1000) {
+    if (Date.now() - startedAt > timeBudgetMs - LIMITS.SAFETY_BUFFER_MS) {
       return lastResult || { ok: false, error: 'time_budget_exceeded' }
     }
     
@@ -834,11 +887,11 @@ function fetchLowestPriceWithBackoff_(appid, itemName, options) {
       
       // Базовый интервал: междуItemsMs (обычно 150мс)
       // Адаптивно увеличивается если предыдущий запрос был недавно
-      let minInterval = options.betweenItemsMs || 150
+      let minInterval = options.betweenItemsMs || LIMITS.BETWEEN_ITEMS_MS
       
       // Если прошло больше 200мс с последнего запроса, можно ускориться
-      if (timeSinceLastFetch > 200) {
-        minInterval = Math.max(100, minInterval - 50)
+      if (timeSinceLastFetch > LIMITS.BASE_DELAY_MS) {
+        minInterval = Math.max(LIMITS.MIN_INTERVAL_MS, minInterval - 50)
       }
       
       // Защита от слишком быстрых запросов
@@ -853,9 +906,9 @@ function fetchLowestPriceWithBackoff_(appid, itemName, options) {
     
     // Умные задержки между попытками для одного предмета
     if (attempt < attempts) {
-      const errorDelay = Math.min(delay, 250) // 200-250мс между попытками
+      const errorDelay = Math.min(delay, LIMITS.MAX_ERROR_DELAY_MS)
       Utilities.sleep(errorDelay)
-      delay = Math.min(delay * 1.5, 250)
+      delay = Math.min(delay * 1.5, LIMITS.MAX_ERROR_DELAY_MS)
     }
   }
   
@@ -974,7 +1027,7 @@ function getOrCreateAutoLogSheet_() {
   return createLogSheet_(
     SHEET_NAMES.AUTO_LOG,
     ['Дата/время', 'Лист', 'Действие', 'Статус'],
-    [150, 100, 200, 100] // Дата/время, Лист, Действие, Статус
+    LIMITS.LOG_COLUMN_WIDTHS.AUTO_LOG
   )
 }
 
@@ -1025,7 +1078,7 @@ function getOrCreateLogSheet_() {
   return createLogSheet_(
     SHEET_NAMES.LOG,
     ['Дата/время', 'Тип', 'Изображение', 'Предмет', 'Кол-во', 'Цена за шт', 'Сумма', 'Источник'],
-    [150, 90, 120, 250, 90, 120, 120, 120] // Дата/время, Тип, Изображение, Предмет, Кол-во, Цена за шт, Сумма, Источник
+    LIMITS.LOG_COLUMN_WIDTHS.LOG
   )
 }
 
@@ -1125,7 +1178,7 @@ function updateImagesAndLinksUniversal_(config, sheet, updateAll, moduleName) {
         linkFormulas[i][0] = built.link
       }
       updatedCount++
-      Utilities.sleep(100)
+      Utilities.sleep(LIMITS.HISTORY_UPDATE_DELAY_MS)
     } catch (e) {
       console.error(`${moduleName}: ошибка при обновлении изображения ${name}:`, e)
       errorCount++
@@ -1143,6 +1196,16 @@ function updateImagesAndLinksUniversal_(config, sheet, updateAll, moduleName) {
 
 // Вспомогательная функция для получения индекса колонки
 function getColumnIndex(columnLetter) {
+  if (!columnLetter) {
+    console.error('getColumnIndex: columnLetter не определен (undefined или null)')
+    return 0
+  }
+  
+  if (typeof columnLetter !== 'string') {
+    console.error(`getColumnIndex: columnLetter должен быть строкой, получен ${typeof columnLetter}`)
+    return 0
+  }
+  
   let result = 0
   for (let i = 0; i < columnLetter.length; i++) {
     result = result * 26 + (columnLetter.charCodeAt(i) - 'A'.charCodeAt(0) + 1)
@@ -1350,12 +1413,14 @@ function syncExtendedAnalyticsFromHistoryUniversal_(targetSheet, phaseColIndex, 
 
   const count = lastRow - 1
   const names = targetSheet.getRange(DATA_START_ROW, 2, count, 1).getValues()
-  const phaseCol = targetSheet.getRange(DATA_START_ROW, phaseColIndex, count, 1).getValues()
-  const potentialCol = targetSheet.getRange(DATA_START_ROW, potentialColIndex, count, 1).getValues()
+  
+  // Поддержка null для phase и potential (для Sales, где они не используются)
+  const phaseCol = phaseColIndex ? targetSheet.getRange(DATA_START_ROW, phaseColIndex, count, 1).getValues() : null
+  const potentialCol = potentialColIndex ? targetSheet.getRange(DATA_START_ROW, potentialColIndex, count, 1).getValues() : null
   const recommendationCol = targetSheet.getRange(DATA_START_ROW, recommendationColIndex, count, 1).getValues()
 
-  const outPhase = phaseCol.map(r => [r[0]])
-  const outPotential = potentialCol.map(r => [r[0]])
+  const outPhase = phaseCol ? phaseCol.map(r => [r[0]]) : null
+  const outPotential = potentialCol ? potentialCol.map(r => [r[0]]) : null
   const outRecommendation = recommendationCol.map(r => [r[0]])
   let updatedCount = 0
 
@@ -1368,9 +1433,9 @@ function syncExtendedAnalyticsFromHistoryUniversal_(targetSheet, phaseColIndex, 
       const name = String(names[i][0] || '').trim()
       if (!name) continue
       
-      if (updateAll || !outPhase[i][0]) {
-        outPhase[i][0] = '❓'
-        outPotential[i][0] = null  // null вместо '—' для числового формата
+      if (updateAll || !outRecommendation[i][0]) {
+        if (outPhase) outPhase[i][0] = '❓'
+        if (outPotential) outPotential[i][0] = null  // null вместо '—' для числового формата
         outRecommendation[i][0] = '👀 НАБЛЮДАТЬ'
         updatedCount++
       }
@@ -1413,30 +1478,34 @@ function syncExtendedAnalyticsFromHistoryUniversal_(targetSheet, phaseColIndex, 
       if (!name) continue
 
       if (!updateAll) {
-        const hasPhase = outPhase[i][0] != null && outPhase[i][0] !== ''
-        const hasPotential = outPotential[i][0] != null && outPotential[i][0] !== ''
+        const hasPhase = outPhase ? (outPhase[i][0] != null && outPhase[i][0] !== '') : true
+        const hasPotential = outPotential ? (outPotential[i][0] != null && outPotential[i][0] !== '') : true
         const hasRecommendation = outRecommendation[i][0] != null && outRecommendation[i][0] !== ''
         if (hasPhase && hasPotential && hasRecommendation) continue
       }
 
       const historyData = historyMap.get(name)
       if (historyData) {
-        outPhase[i][0] = historyData.phase
-        outPotential[i][0] = historyData.potential
+        if (outPhase) outPhase[i][0] = historyData.phase
+        if (outPotential) outPotential[i][0] = historyData.potential
         outRecommendation[i][0] = historyData.recommendation
         updatedCount++
       } else {
         // Предмет не найден в History - ставим значения по умолчанию
-        outPhase[i][0] = '❓'
-        outPotential[i][0] = null  // null вместо '—' для числового формата
+        if (outPhase) outPhase[i][0] = '❓'
+        if (outPotential) outPotential[i][0] = null  // null вместо '—' для числового формата
         outRecommendation[i][0] = '👀 НАБЛЮДАТЬ'
         updatedCount++
       }
     }
   }
 
-  targetSheet.getRange(DATA_START_ROW, phaseColIndex, count, 1).setValues(outPhase)
-  targetSheet.getRange(DATA_START_ROW, potentialColIndex, count, 1).setValues(outPotential)
+  if (outPhase && phaseColIndex) {
+    targetSheet.getRange(DATA_START_ROW, phaseColIndex, count, 1).setValues(outPhase)
+  }
+  if (outPotential && potentialColIndex) {
+    targetSheet.getRange(DATA_START_ROW, potentialColIndex, count, 1).setValues(outPotential)
+  }
   targetSheet.getRange(DATA_START_ROW, recommendationColIndex, count, 1).setValues(outRecommendation)
 
   return { updatedCount }

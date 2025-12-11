@@ -300,6 +300,12 @@ function invest_formatTable() {
   const sheet = getOrCreateInvestSheet_()
   const headers = HEADERS.INVEST // 28 колонок (новая структура)
   
+  if (!headers || !Array.isArray(headers) || headers.length === 0) {
+    console.error('Invest: HEADERS.INVEST не определен или пуст')
+    SpreadsheetApp.getUi().alert('Ошибка: HEADERS.INVEST не определен в Constants.gs')
+    return
+  }
+  
   // Базовое форматирование таблицы
   const lastRow = formatTableBase_(sheet, headers, INVEST_COLUMNS, getInvestSheet_, 'Invest')
   if (lastRow === 0) return
@@ -394,7 +400,7 @@ function invest_formatTable() {
     }
   }
   
-  SpreadsheetApp.getUi().alert('Форматирование завершено (Invest)')
+  console.log('Invest: форматирование завершено')
 }
 
 
@@ -477,7 +483,7 @@ function invest_updateMetricsFromSteamWebAPI(itemNames) {
     }
     // Задержка между batch запросами
     if (i + batchSize < itemNames.length) {
-      Utilities.sleep(500)
+      Utilities.sleep(LIMITS.METRICS_UPDATE_DELAY_MS)
     }
   }
   
@@ -506,14 +512,38 @@ function invest_calculateAllMetrics() {
   // Получаем историю цен из History
   const historySheet = getHistorySheet_()
   
-  // Обновляем метрики для каждой строки
+  // Подготовка данных для batch-операций
+  const liquidityScores = []
+  const demandRatios = []
+  const priceMomenta = []
+  const salesTrends = []
+  const volatilityIndices = []
+  const heroTrends = []
+  const historyNames = historySheet ? historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues() : []
+  
+  // Рассчитываем метрики для всех строк
   for (let i = 0; i < itemNames.length; i++) {
     const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) continue
+    if (!itemName) {
+      liquidityScores.push([null])
+      demandRatios.push([null])
+      priceMomenta.push([null])
+      salesTrends.push([null])
+      volatilityIndices.push([null])
+      heroTrends.push([null])
+      continue
+    }
     
-    const row = DATA_START_ROW + i
     const itemData = itemsData[itemName]
-    if (!itemData) continue
+    if (!itemData) {
+      liquidityScores.push([null])
+      demandRatios.push([null])
+      priceMomenta.push([null])
+      salesTrends.push([null])
+      volatilityIndices.push([null])
+      heroTrends.push([null])
+      continue
+    }
     
     const mapping = mappings[itemName]
     const category = mapping ? mapping.category : 'Common Item'
@@ -522,33 +552,42 @@ function invest_calculateAllMetrics() {
     
     // Получаем историю цен
     let historyData = null
-    if (historySheet) {
-      historyData = history_getPriceHistoryForItem_(historySheet, historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues().findIndex(r => String(r[0] || '').trim() === itemName) + DATA_START_ROW)
+    if (historySheet && historyNames.length > 0) {
+      const historyRowIndex = historyNames.findIndex(r => String(r[0] || '').trim() === itemName)
+      if (historyRowIndex >= 0) {
+        historyData = history_getPriceHistoryForItem_(historySheet, historyRowIndex + DATA_START_ROW)
+      }
     }
     
     // Рассчитываем метрики
-    const liquidityScore = analytics_calculateLiquidityScore(itemData)
-    const demandRatio = analytics_calculateDemandRatio(itemData)
-    const priceMomentum = analytics_calculatePriceMomentum(itemData, historyData)
-    const salesTrend = analytics_calculateSalesTrend(itemData)
-    const volatilityIndex = analytics_calculateVolatilityIndex(itemData, historyData)
-    
-    // Обновляем колонки метрик
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.LIQUIDITY_SCORE)).setValue(liquidityScore)
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.DEMAND_RATIO)).setValue(demandRatio)
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.PRICE_MOMENTUM)).setValue(priceMomentum)
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.SALES_TREND)).setValue(salesTrend)
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.VOLATILITY_INDEX)).setValue(volatilityIndex)
+    liquidityScores.push([analytics_calculateLiquidityScore(itemData)])
+    demandRatios.push([analytics_calculateDemandRatio(itemData)])
+    priceMomenta.push([analytics_calculatePriceMomentum(itemData, historyData)])
+    salesTrends.push([analytics_calculateSalesTrend(itemData)])
+    volatilityIndices.push([analytics_calculateVolatilityIndex(itemData, historyData)])
     
     // Hero Trend Score (только для Hero Items)
+    let heroTrendValue = null
     if (category === 'Hero Item' && heroId && rankCategory) {
       const latestStats = heroStats_getLatestStats(heroId, rankCategory)
       if (latestStats) {
         const heroStatsObj = {[rankCategory]: latestStats}
         const heroTrendScore = analytics_calculateHeroTrendScore(heroId, rankCategory, heroStatsObj)
-        sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.HERO_TREND)).setValue(analytics_formatScore(heroTrendScore))
+        heroTrendValue = analytics_formatScore(heroTrendScore)
       }
     }
+    heroTrends.push([heroTrendValue])
+  }
+  
+  // Batch-запись всех метрик
+  const count = liquidityScores.length
+  if (count > 0) {
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.LIQUIDITY_SCORE), count, 1).setValues(liquidityScores)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.DEMAND_RATIO), count, 1).setValues(demandRatios)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PRICE_MOMENTUM), count, 1).setValues(priceMomenta)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.SALES_TREND), count, 1).setValues(salesTrends)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.VOLATILITY_INDEX), count, 1).setValues(volatilityIndices)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.HERO_TREND), count, 1).setValues(heroTrends)
   }
 }
 
@@ -574,14 +613,26 @@ function invest_updateInvestmentScores() {
   // Получаем историю цен из History
   const historySheet = getHistorySheet_()
   
-  // Обновляем Investment Score для каждой строки
+  // Подготовка данных для batch-операций
+  const investmentScores = []
+  const riskLevels = []
+  const historyNames = historySheet ? historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues() : []
+  
+  // Рассчитываем Investment Score и Risk Level для всех строк
   for (let i = 0; i < itemNames.length; i++) {
     const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) continue
+    if (!itemName) {
+      investmentScores.push([null])
+      riskLevels.push([null])
+      continue
+    }
     
-    const row = DATA_START_ROW + i
     const itemData = itemsData[itemName]
-    if (!itemData) continue
+    if (!itemData) {
+      investmentScores.push([null])
+      riskLevels.push([null])
+      continue
+    }
     
     const mapping = mappings[itemName]
     const category = mapping ? mapping.category : 'Common Item'
@@ -590,10 +641,10 @@ function invest_updateInvestmentScores() {
     
     // Получаем историю цен
     let historyData = null
-    if (historySheet) {
-      const historyRow = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues().findIndex(r => String(r[0] || '').trim() === itemName)
-      if (historyRow >= 0) {
-        historyData = history_getPriceHistoryForItem_(historySheet, historyRow + DATA_START_ROW)
+    if (historySheet && historyNames.length > 0) {
+      const historyRowIndex = historyNames.findIndex(r => String(r[0] || '').trim() === itemName)
+      if (historyRowIndex >= 0) {
+        historyData = history_getPriceHistoryForItem_(historySheet, historyRowIndex + DATA_START_ROW)
       }
     }
     
@@ -616,15 +667,20 @@ function invest_updateInvestmentScores() {
       rankCategory
     )
     
-    // Обновляем колонку Investment Score
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.INVESTMENT_SCORE))
-      .setValue(analytics_formatScore(investmentScore))
+    investmentScores.push([analytics_formatScore(investmentScore)])
     
     // Рассчитываем Risk Level
     const volatilityIndex = analytics_calculateVolatilityIndex(itemData, historyData)
     const demandRatio = analytics_calculateDemandRatio(itemData)
     const riskLevel = analytics_calculateRiskLevel(investmentScore, volatilityIndex, demandRatio)
-    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.RISK_LEVEL)).setValue(riskLevel)
+    riskLevels.push([riskLevel])
+  }
+  
+  // Batch-запись Investment Scores и Risk Levels
+  const count = investmentScores.length
+  if (count > 0) {
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.INVESTMENT_SCORE), count, 1).setValues(investmentScores)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.RISK_LEVEL), count, 1).setValues(riskLevels)
   }
 }
 
@@ -660,4 +716,5 @@ function invest_generateRecommendation(row) {
   }
   return `👀 НАБЛЮДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
 }
+
 

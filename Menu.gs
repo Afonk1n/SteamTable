@@ -8,6 +8,9 @@
 // Архитектура:
 // 1. Два фиксированных триггера (00:10 и 12:00) для создания колонок периодов и начала сбора
 // 2. Один периодический триггер (каждые 10 минут) для продолжения сбора до завершения периода
+// 3. Три триггера для обновления статистики героев (08:00, 14:00, 20:00)
+// 4. Один триггер для архивации данных HeroStats (воскресенье 03:00)
+// 5. Один триггер для синхронизации HeroMapping (ежедневно 04:00)
 // Такая архитектура обеспечивает надежность - нет риска что временные триггеры не создадутся или удалятся преждевременно
 function setupAllTriggers() {
   removeAllTriggers()
@@ -38,6 +41,33 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('telegram_checkDailyPriceTargets')
     .timeBased()
     .atHour(13) // 13:00 (час дня)
+    .everyDays(1)
+    .create()
+  
+  // Автоматическое обновление статистики героев (если включено в конфигурации)
+  if (HERO_STATS_UPDATE_SCHEDULE.ENABLED && HERO_STATS_UPDATE_SCHEDULE.HOURS) {
+    HERO_STATS_UPDATE_SCHEDULE.HOURS.forEach(hour => {
+      ScriptApp.newTrigger('autoUpdateHeroStats')
+        .timeBased()
+        .atHour(hour)
+        .everyDays(1)
+        .create()
+    })
+  }
+  
+  // Автоматическая архивация данных HeroStats (воскресенье 03:00)
+  // Используем everyWeeks для запуска каждое воскресенье
+  ScriptApp.newTrigger('autoArchiveHeroStats')
+    .timeBased()
+    .everyWeeks(1)
+    .onWeekDay(ScriptApp.WeekDay.SUNDAY)
+    .atHour(3)
+    .create()
+  
+  // Автоматическая синхронизация HeroMapping (ежедневно 04:00)
+  ScriptApp.newTrigger('autoSyncHeroMapping')
+    .timeBased()
+    .atHour(4) // 04:00
     .everyDays(1)
     .create()
   
@@ -73,7 +103,15 @@ function onOpen() {
     .addItem('Выключить автообновление', 'removeAllTriggers')
     .addSeparator()
     .addItem('Инициализировать все таблицы', 'initializeAllTables')
-    .addItem('Первоначальная настройка', 'performInitialSetup')
+    .addSeparator()
+    .addItem('Полная настройка (все шаги)', 'performFullSetup')
+    .addItem('Шаг 0: Расчет Min/Max из SteamWebAPI', 'setupMinMax')
+    .addItem('Шаг 1: Настройка HeroMapping', 'setupHeroMapping')
+    .addItem('Шаг 2: Обновление статистики героев', 'setupHeroStats')
+    .addItem('Шаг 3: Обновление аналитики и метрик', 'setupAnalytics')
+    .addSeparator()
+    .addItem('Проверить готовность системы', 'checkSystemReadiness')
+    .addItem('Проверить состояние автоматизации', 'checkAutomationStatus')
     .addSeparator()
     .addItem('Обновить цены History (ручное)', 'history_updateAllPrices')
     .addItem('Рассчитать Min/Max для всех предметов', 'priceHistory_calculateMinMaxForAllItems')
@@ -84,11 +122,17 @@ function onOpen() {
       .addItem('Форматирование', 'invest_formatTable')
       .addItem('Изображение и ссылки', 'invest_updateImagesAndLinks')
       .addItem('Поиск дублей', 'invest_findDuplicates')
+      .addSeparator()
+      .addItem('Обновить метрики', 'invest_calculateAllMetrics')
+      .addItem('Обновить Investment Scores', 'invest_updateInvestmentScores')
     )
     .addSubMenu(ui.createMenu('Sales')
       .addItem('Форматирование', 'sales_formatTable')
       .addItem('Изображение и ссылки', 'sales_updateImagesAndLinks')
       .addItem('Поиск дублей', 'sales_findDuplicates')
+      .addSeparator()
+      .addItem('Обновить метрики', 'sales_calculateAllMetrics')
+      .addItem('Обновить Buyback Scores', 'sales_updateBuybackScores')
     )
     .addSubMenu(ui.createMenu('History')
       .addItem('Форматирование', 'history_formatTable')
@@ -96,6 +140,9 @@ function onOpen() {
       .addItem('Изображения и ссылки', 'history_updateImagesAndLinks')
       .addItem('Дубли названий', 'history_findDuplicates')
       .addItem('Создать столбец текущего периода', 'history_ensureTodayColumn')
+      .addSeparator()
+      .addItem('Синхронизировать статистику героев', 'history_syncHeroStats')
+      .addItem('Обновить Investment Scores', 'history_updateInvestmentScores')
     )
     .addSubMenu(ui.createMenu('PortfolioStats')
       .addItem('Форматирование', 'portfolioStats_formatTable')
@@ -103,7 +150,7 @@ function onOpen() {
     )
     .addSubMenu(ui.createMenu('HeroStats')
       .addItem('Форматирование', 'heroStats_formatTable')
-      .addItem('Обновить статистику (ручное)', 'heroStats_updateAllStats')
+      .addItem('Обновить статистику (с про-статистикой)', 'heroStats_updateAllStats')
       .addItem('Архивировать старые данные', 'heroStats_archiveOldData')
     )
     .addSubMenu(ui.createMenu('HeroMapping')
@@ -112,8 +159,13 @@ function onOpen() {
       .addItem('Синхронизировать с History', 'heroMapping_syncWithHistory')
     )
     .addSeparator()
-    .addItem('Синхронизировать цены из History', 'syncPricesFromHistoryToInvestAndSales')
-    .addItem('Обновить аналитику Invest/Sales', 'syncAnalyticsForInvestSales_')
+    .addSubMenu(ui.createMenu('Синхронизация')
+      .addItem('Синхронизировать цены из History', 'syncPricesFromHistoryToInvestAndSales')
+      .addItem('Обновить аналитику Invest/Sales', 'syncAnalyticsForInvestSales_')
+      .addSeparator()
+      .addItem('Обновить метрики Invest/Sales', 'updateAllMetricsForInvestSales')
+      .addItem('Обновить все метрики и скоры', 'updateAllMetricsAndScores_')
+    )
     .addSeparator()
     .addSubMenu(ui.createMenu('API Settings')
       .addItem('Тест OpenDota API', 'openDota_testConnection')
@@ -140,7 +192,7 @@ function initializeAllTables() {
     // Создаем листы логов, если их еще нет
     getOrCreateAutoLogSheet_()
     getOrCreateLogSheet_()
-    SpreadsheetApp.getUi().alert('✅ Все таблицы инициализированы и отформатированы')
+    console.log('Menu: все таблицы инициализированы и отформатированы')
   } catch (e) {
     console.error('Menu: ошибка инициализации таблиц:', e)
     SpreadsheetApp.getUi().alert('Ошибка инициализации таблиц: ' + e.message)
@@ -265,7 +317,8 @@ function performInitialSetup() {
     if (results.statsUpdated) summary += '✅ Обновление статистики героев\n'
     
     summary += '\nСледующие шаги:\n'
-    summary += '• Включите автообновление: SteamTable → Включить автообновление'
+    summary += '• Используйте "Полная настройка" для автоматического обновления аналитики и метрик\n'
+    summary += '• Или включите автообновление: SteamTable → Включить автообновление'
     
     logAutoAction_('InitialSetup', 'Первоначальная настройка', `Завершено: ${completed}/${total} шагов`)
     ui.alert('Настройка завершена', summary, ui.ButtonSet.OK)
@@ -280,6 +333,331 @@ function performInitialSetup() {
   }
 }
 
+/**
+ * Шаг 1: Настройка HeroMapping
+ * Синхронизирует предметы и определяет героев
+ */
+function setupHeroMapping() {
+  const startTime = Date.now()
+  
+  try {
+    console.log('Setup: синхронизация HeroMapping...')
+    heroMapping_syncWithHistory()
+    console.log('Setup: HeroMapping синхронизирован')
+    
+    console.log('Setup: автоопределение героев...')
+    heroMapping_autoDetectFromSteamWebAPI()
+    console.log('Setup: герои определены')
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+    console.log(`Setup: настройка HeroMapping завершена за ${duration} сек`)
+    logAutoAction_('Setup', 'Настройка HeroMapping', `OK (${duration} сек)`)
+    
+  } catch (e) {
+    console.error('Setup: ошибка настройки HeroMapping:', e)
+    logAutoAction_('Setup', 'Настройка HeroMapping', `Ошибка: ${e.message}`)
+    SpreadsheetApp.getUi().alert('Ошибка настройки HeroMapping: ' + e.message)
+  }
+}
+
+/**
+ * Шаг 2: Обновление статистики героев
+ * Получает статистику через OpenDota API и синхронизирует в History
+ */
+function setupHeroStats() {
+  const startTime = Date.now()
+  
+  try {
+    console.log('Setup: обновление статистики героев...')
+    heroStats_updateAllStats()
+    console.log('Setup: статистика героев обновлена')
+    
+    console.log('Setup: синхронизация статистики в History...')
+    history_syncHeroStats()
+    console.log('Setup: статистика синхронизирована в History')
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+    console.log(`Setup: настройка статистики героев завершена за ${duration} сек`)
+    logAutoAction_('Setup', 'Настройка статистики героев', `OK (${duration} сек)`)
+    
+  } catch (e) {
+    console.error('Setup: ошибка настройки статистики героев:', e)
+    logAutoAction_('Setup', 'Настройка статистики героев', `Ошибка: ${e.message}`)
+    SpreadsheetApp.getUi().alert('Ошибка настройки статистики героев: ' + e.message)
+  }
+}
+
+/**
+ * Шаг 0: Расчет Min/Max из SteamWebAPI (опционально)
+ * Получает Min/Max для всех предметов из SteamWebAPI
+ * Выполняется только если Min/Max отсутствуют
+ */
+function setupMinMax() {
+  const startTime = Date.now()
+  
+  try {
+    const historySheet = getHistorySheet_()
+    if (!historySheet) {
+      console.warn('Setup: лист History не найден, пропускаем Min/Max')
+      return
+    }
+    
+    const lastRow = historySheet.getLastRow()
+    if (lastRow < DATA_START_ROW) {
+      console.warn('Setup: нет предметов в History, пропускаем Min/Max')
+      return
+    }
+    
+    // Проверяем, нужен ли расчет Min/Max
+    const names = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
+    const minBatch = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.MIN_PRICE), lastRow - HEADER_ROW, 1).getValues()
+    const maxBatch = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.MAX_PRICE), lastRow - HEADER_ROW, 1).getValues()
+    
+    let missingCount = 0
+    for (let i = 0; i < names.length; i++) {
+      const name = String(names[i][0] || '').trim()
+      if (!name) continue
+      
+      const minValue = minBatch[i][0]
+      const maxValue = maxBatch[i][0]
+      const hasMin = minValue !== null && minValue !== '' && Number.isFinite(Number(minValue)) && Number(minValue) > 0
+      const hasMax = maxValue !== null && maxValue !== '' && Number.isFinite(Number(maxValue)) && Number(maxValue) > 0
+      
+      if (!hasMin || !hasMax) {
+        missingCount++
+      }
+    }
+    
+    if (missingCount === 0) {
+      console.log('Setup: все Min/Max уже заполнены, пропускаем')
+      return
+    }
+    
+    console.log(`Setup: требуется расчет Min/Max для ${missingCount} предметов...`)
+    priceHistory_calculateMinMaxForAllItems(true) // onlyMissing = true
+    console.log('Setup: Min/Max рассчитаны')
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+    console.log(`Setup: настройка Min/Max завершена за ${duration} сек`)
+    logAutoAction_('Setup', 'Настройка Min/Max', `OK (${duration} сек, ${missingCount} предметов)`)
+    
+  } catch (e) {
+    console.error('Setup: ошибка настройки Min/Max:', e)
+    logAutoAction_('Setup', 'Настройка Min/Max', `Ошибка: ${e.message}`)
+    // Не показываем alert, так как это опциональный шаг
+  }
+}
+
+/**
+ * Шаг 3: Обновление аналитики и метрик
+ * Обновляет аналитику History (включая Min/Max из существующих цен) и Investment Scores
+ */
+function setupAnalytics() {
+  const startTime = Date.now()
+  
+  try {
+    console.log('Setup: обновление аналитики History...')
+    // history_updateAllAnalytics_ включает обновление Min/Max из существующих цен в колонках
+    history_updateAllAnalytics_()
+    console.log('Setup: аналитика History обновлена (включая Min/Max из существующих цен)')
+    
+    console.log('Setup: обновление Investment Scores...')
+    history_updateInvestmentScores()
+    console.log('Setup: Investment Scores обновлены')
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+    console.log(`Setup: настройка аналитики завершена за ${duration} сек`)
+    logAutoAction_('Setup', 'Настройка аналитики', `OK (${duration} сек)`)
+    
+  } catch (e) {
+    console.error('Setup: ошибка настройки аналитики:', e)
+    logAutoAction_('Setup', 'Настройка аналитики', `Ошибка: ${e.message}`)
+    SpreadsheetApp.getUi().alert('Ошибка настройки аналитики: ' + e.message)
+  }
+}
+
+/**
+ * Полная настройка таблицы - последовательный вызов всех шагов
+ * Предполагается, что предметы уже добавлены в History вручную
+ */
+function performFullSetup() {
+  const ui = SpreadsheetApp.getUi()
+  
+  const response = ui.alert(
+    'Полная настройка',
+    'Выполнит все шаги настройки последовательно:\n\n' +
+    '1. Расчет Min/Max из SteamWebAPI (если отсутствуют)\n' +
+    '2. Настройка HeroMapping\n' +
+    '3. Обновление статистики героев\n' +
+    '4. Обновление аналитики и метрик\n\n' +
+    '⚠️ Убедитесь, что:\n' +
+    '• Таблицы инициализированы\n' +
+    '• Предметы добавлены в History\n\n' +
+    'Продолжить?',
+    ui.ButtonSet.YES_NO
+  )
+  
+  if (response !== ui.Button.YES) {
+    return
+  }
+  
+  const totalStartTime = Date.now()
+  
+  try {
+    setupMinMax() // Шаг 0: Min/Max из SteamWebAPI (опционально)
+    setupHeroMapping()
+    setupHeroStats()
+    setupAnalytics()
+    
+    const totalDuration = ((Date.now() - totalStartTime) / 1000).toFixed(1)
+    console.log(`FullSetup: полная настройка завершена за ${totalDuration} сек`)
+    logAutoAction_('FullSetup', 'Полная настройка', `Завершено (${totalDuration} сек)`)
+    
+    ui.alert(
+      'Настройка завершена',
+      `✅ Все шаги выполнены успешно!\n\nВремя: ${totalDuration} сек\n\n` +
+      `💡 Следующие шаги:\n` +
+      `• Метрики Invest/Sales обновятся автоматически при использовании\n` +
+      `• Включите автообновление: SteamTable → Включить автообновление`,
+      ui.ButtonSet.OK
+    )
+    
+  } catch (e) {
+    console.error('FullSetup: критическая ошибка:', e)
+    logAutoAction_('FullSetup', 'Полная настройка', `Критическая ошибка: ${e.message}`)
+    ui.alert('Ошибка', 'Произошла критическая ошибка: ' + e.message, ui.ButtonSet.OK)
+  }
+}
+
+/**
+ * Проверка готовности системы
+ * Проверяет наличие данных в History, заполненность Min/Max, наличие HeroMapping, наличие статистики героев
+ */
+function checkSystemReadiness() {
+  const ui = SpreadsheetApp.getUi()
+  
+  try {
+    const checks = {
+      historyHasData: false,
+      minMaxFilled: false,
+      heroMappingExists: false,
+      heroStatsExists: false,
+      triggersEnabled: false
+    }
+    
+    let report = '🔍 ПРОВЕРКА ГОТОВНОСТИ СИСТЕМЫ\n\n'
+    
+    // Проверка 1: История содержит данные
+    try {
+      const historySheet = getHistorySheet_()
+      if (historySheet && historySheet.getLastRow() >= DATA_START_ROW) {
+        const itemCount = historySheet.getLastRow() - HEADER_ROW
+        checks.historyHasData = true
+        report += `✅ History: ${itemCount} предметов\n`
+      } else {
+        report += `❌ History: нет данных\n`
+      }
+    } catch (e) {
+      report += `❌ History: ошибка проверки\n`
+    }
+    
+    // Проверка 2: Min/Max заполнены
+    try {
+      const historySheet = getHistorySheet_()
+      if (historySheet && historySheet.getLastRow() >= DATA_START_ROW) {
+        const minCol = getColumnIndex(HISTORY_COLUMNS.MIN)
+        const maxCol = getColumnIndex(HISTORY_COLUMNS.MAX)
+        const minMaxValues = historySheet.getRange(DATA_START_ROW, minCol, historySheet.getLastRow() - HEADER_ROW, 2).getValues()
+        
+        const filledCount = minMaxValues.filter(row => row[0] && row[1] && row[0] !== '' && row[1] !== '').length
+        const totalCount = minMaxValues.length
+        const fillPercentage = totalCount > 0 ? (filledCount / totalCount * 100).toFixed(0) : 0
+        
+        if (fillPercentage >= 80) {
+          checks.minMaxFilled = true
+          report += `✅ Min/Max: заполнено ${fillPercentage}% (${filledCount}/${totalCount})\n`
+        } else {
+          report += `⚠️ Min/Max: заполнено только ${fillPercentage}% (${filledCount}/${totalCount})\n`
+        }
+      }
+    } catch (e) {
+      report += `❌ Min/Max: ошибка проверки\n`
+    }
+    
+    // Проверка 3: HeroMapping существует и содержит данные
+    try {
+      const mappingSheet = getHeroMappingSheet_()
+      if (mappingSheet && mappingSheet.getLastRow() >= DATA_START_ROW) {
+        const mappingCount = mappingSheet.getLastRow() - HEADER_ROW
+        checks.heroMappingExists = true
+        report += `✅ HeroMapping: ${mappingCount} записей\n`
+      } else {
+        report += `❌ HeroMapping: нет данных\n`
+      }
+    } catch (e) {
+      report += `❌ HeroMapping: ошибка проверки\n`
+    }
+    
+    // Проверка 4: HeroStats содержит данные
+    try {
+      const heroStatsSheet = getHeroStatsSheet_()
+      if (heroStatsSheet && heroStatsSheet.getLastRow() >= DATA_START_ROW) {
+        // Проверяем наличие колонок с данными (после колонки C)
+        const lastCol = heroStatsSheet.getLastColumn()
+        if (lastCol > HERO_STATS_COLUMNS.FIRST_DATA_COL) {
+          checks.heroStatsExists = true
+          const statsCount = (heroStatsSheet.getLastRow() - HEADER_ROW) / 2 // Две строки на героя
+          report += `✅ HeroStats: ${statsCount} героев, ${lastCol - HERO_STATS_COLUMNS.FIRST_DATA_COL} записей\n`
+        } else {
+          report += `⚠️ HeroStats: нет записей статистики\n`
+        }
+      } else {
+        report += `❌ HeroStats: нет данных\n`
+      }
+    } catch (e) {
+      report += `❌ HeroStats: ошибка проверки\n`
+    }
+    
+    // Проверка 5: Триггеры включены
+    try {
+      const triggers = ScriptApp.getProjectTriggers()
+      if (triggers.length > 0) {
+        checks.triggersEnabled = true
+        report += `✅ Триггеры: ${triggers.length} активных\n`
+      } else {
+        report += `⚠️ Триггеры: не включены\n`
+      }
+    } catch (e) {
+      report += `❌ Триггеры: ошибка проверки\n`
+    }
+    
+    // Итоговая оценка
+    const passedChecks = Object.values(checks).filter(v => v === true).length
+    const totalChecks = Object.keys(checks).length
+    
+    report += `\n📊 РЕЗУЛЬТАТ: ${passedChecks}/${totalChecks} проверок пройдено\n\n`
+    
+    if (passedChecks === totalChecks) {
+      report += '🎉 Система полностью готова к работе!'
+    } else if (passedChecks >= totalChecks - 1) {
+      report += '✅ Система почти готова. Рекомендуется выполнить недостающие шаги.'
+    } else {
+      report += '⚠️ Система требует настройки. Используйте:\n'
+      if (!checks.historyHasData) report += '• Добавьте предметы в History\n'
+      if (!checks.minMaxFilled) report += '• Рассчитайте Min/Max цены\n'
+      if (!checks.heroMappingExists) report += '• Синхронизируйте HeroMapping\n'
+      if (!checks.heroStatsExists) report += '• Обновите статистику героев\n'
+      if (!checks.triggersEnabled) report += '• Включите автообновление\n'
+    }
+    
+    ui.alert('Проверка готовности', report, ui.ButtonSet.OK)
+    
+  } catch (e) {
+    console.error('checkSystemReadiness: ошибка:', e)
+    ui.alert('Ошибка', 'Не удалось проверить готовность системы: ' + e.message, ui.ButtonSet.OK)
+  }
+}
+
 // Единая синхронизация аналитики для Invest/Sales
 function syncAnalyticsForInvestSales_() {
   try {
@@ -289,9 +667,278 @@ function syncAnalyticsForInvestSales_() {
     sales_syncMinMaxFromHistory()
     sales_syncTrendDaysFromHistory()
     sales_syncExtendedAnalyticsFromHistory()
-    SpreadsheetApp.getUi().alert('Аналитика синхронизирована (Invest/Sales)')
+    
+    // Обновляем метрики после синхронизации аналитики
+    updateAllMetricsForInvestSales()
+    
+    SpreadsheetApp.getUi().alert('Аналитика и метрики синхронизированы (Invest/Sales)')
   } catch (e) {
     console.error('Menu: ошибка синхронизации аналитики:', e)
     SpreadsheetApp.getUi().alert('Ошибка синхронизации аналитики')
+  }
+}
+
+/**
+ * Комплексное обновление всех метрик и скоров для Invest/Sales/History
+ * Оптимизированная функция для ручного использования
+ */
+function updateAllMetricsAndScores_() {
+  const ui = SpreadsheetApp.getUi()
+  
+  const response = ui.alert(
+    'Обновление всех метрик и скоров',
+    'Эта функция обновит:\n\n' +
+    '• Метрики для Invest/Sales (Liquidity, Demand, Momentum, Sales Trend, Volatility)\n' +
+    '• Investment Scores для History и Invest\n' +
+    '• Buyback Scores для Sales\n' +
+    '• Синхронизацию статистики героев\n\n' +
+    'Это может занять несколько минут. Продолжить?',
+    ui.ButtonSet.YES_NO
+  )
+  
+  if (response !== ui.Button.YES) {
+    return
+  }
+  
+  try {
+    ui.alert('Начинаем обновление метрик и скоров...')
+    
+    // 1. Обновляем метрики для Invest
+    console.log('Menu: обновление метрик Invest...')
+    invest_calculateAllMetrics()
+    
+    // 2. Обновляем метрики для Sales
+    console.log('Menu: обновление метрик Sales...')
+    sales_calculateAllMetrics()
+    
+    // 3. Обновляем Investment Scores для History
+    console.log('Menu: обновление Investment Scores для History...')
+    history_updateInvestmentScores()
+    
+    // 4. Обновляем Investment Scores для Invest
+    console.log('Menu: обновление Investment Scores для Invest...')
+    invest_updateInvestmentScores()
+    
+    // 5. Обновляем Buyback Scores для Sales
+    console.log('Menu: обновление Buyback Scores для Sales...')
+    sales_updateBuybackScores()
+    
+    // 6. Синхронизируем статистику героев
+    console.log('Menu: синхронизация статистики героев...')
+    history_syncHeroStats()
+    
+    ui.alert('✅ Все метрики и скоры обновлены!')
+    logAutoAction_('Menu', 'Обновление всех метрик и скоров', 'Завершено')
+    
+  } catch (e) {
+    console.error('Menu: ошибка при обновлении метрик и скоров:', e)
+    ui.alert('Ошибка при обновлении метрик и скоров: ' + e.message)
+  }
+}
+
+/**
+ * Автоматическое обновление статистики героев (для триггера)
+ * Выполняет полный цикл обновления после получения новой статистики:
+ * 1. Обновление статистики героев через OpenDota API
+ * 2. Синхронизация статистики в History
+ * 3. Обновление Investment Scores для History и Invest
+ * 4. Обновление Buyback Scores для Sales
+ */
+function autoUpdateHeroStats() {
+  const lockKey = 'autoUpdateHeroStats'
+  
+  try {
+    // Проверяем блокировку (таймаут 5 минут)
+    const lockResult = acquireLock_(lockKey, LIMITS.LOCK_TIMEOUT_SEC)
+    if (lockResult.locked) {
+      console.warn('autoUpdateHeroStats: операция уже выполняется, пропускаем')
+      return
+    }
+    
+    console.log('autoUpdateHeroStats: начало автоматического обновления статистики героев')
+    logAutoAction_('AutoUpdate', 'Обновление статистики героев', 'Начало')
+    
+    // 1. Обновление статистики героев
+    try {
+      heroStats_updateAllStats()
+      console.log('autoUpdateHeroStats: статистика героев обновлена')
+    } catch (e) {
+      console.error('autoUpdateHeroStats: ошибка обновления статистики героев:', e)
+      logAutoAction_('AutoUpdate', 'Обновление статистики героев', `Ошибка: ${e.message}`)
+      releaseLock_(lockKey)
+      return
+    }
+    
+    // 2. Синхронизация статистики в History
+    try {
+      history_syncHeroStats()
+      console.log('autoUpdateHeroStats: статистика синхронизирована в History')
+    } catch (e) {
+      console.error('autoUpdateHeroStats: ошибка синхронизации статистики:', e)
+      logAutoAction_('AutoUpdate', 'Синхронизация статистики', `Ошибка: ${e.message}`)
+      // Продолжаем выполнение, даже если синхронизация не удалась
+    }
+    
+    // 3. Обновление Investment Scores для History
+    try {
+      history_updateInvestmentScores()
+      console.log('autoUpdateHeroStats: Investment Scores обновлены для History')
+    } catch (e) {
+      console.error('autoUpdateHeroStats: ошибка обновления Investment Scores для History:', e)
+      logAutoAction_('AutoUpdate', 'Обновление Investment Scores (History)', `Ошибка: ${e.message}`)
+    }
+    
+    // 4. Обновление Investment Scores для Invest
+    try {
+      invest_updateInvestmentScores()
+      console.log('autoUpdateHeroStats: Investment Scores обновлены для Invest')
+    } catch (e) {
+      console.error('autoUpdateHeroStats: ошибка обновления Investment Scores для Invest:', e)
+      logAutoAction_('AutoUpdate', 'Обновление Investment Scores (Invest)', `Ошибка: ${e.message}`)
+    }
+    
+    // 5. Обновление Buyback Scores для Sales
+    try {
+      sales_updateBuybackScores()
+      console.log('autoUpdateHeroStats: Buyback Scores обновлены для Sales')
+    } catch (e) {
+      console.error('autoUpdateHeroStats: ошибка обновления Buyback Scores:', e)
+      logAutoAction_('AutoUpdate', 'Обновление Buyback Scores', `Ошибка: ${e.message}`)
+    }
+    
+    console.log('autoUpdateHeroStats: автоматическое обновление завершено')
+    logAutoAction_('AutoUpdate', 'Обновление статистики героев', 'Завершено')
+    
+  } catch (e) {
+    console.error('autoUpdateHeroStats: критическая ошибка:', e)
+    logAutoAction_('AutoUpdate', 'Обновление статистики героев', `Критическая ошибка: ${e.message}`)
+    
+    // Отправляем уведомление в Telegram, если настроено
+    try {
+      const telegramConfig = telegram_getConfig()
+      if (telegramConfig && telegramConfig.botToken && telegramConfig.chatId) {
+        telegram_sendMessage(
+          `⚠️ <b>Ошибка автоматического обновления статистики героев</b>\n\n` +
+          `Ошибка: ${e.message}`,
+          'HTML'
+        )
+      }
+    } catch (telegramError) {
+      // Игнорируем ошибки Telegram
+      console.warn('autoUpdateHeroStats: не удалось отправить уведомление в Telegram:', telegramError)
+    }
+  } finally {
+    releaseLock_(lockKey)
+  }
+}
+
+/**
+ * Автоматическая архивация старых данных HeroStats (для триггера)
+ * Удаляет данные старше HERO_STATS_HISTORY_DAYS дней
+ */
+function autoArchiveHeroStats() {
+  const lockKey = 'autoArchiveHeroStats'
+  
+  try {
+    // Проверяем блокировку (таймаут 5 минут)
+    const lockResult = acquireLock_(lockKey, LIMITS.LOCK_TIMEOUT_SEC)
+    if (lockResult.locked) {
+      console.warn('autoArchiveHeroStats: операция уже выполняется, пропускаем')
+      return
+    }
+    
+    console.log('autoArchiveHeroStats: начало автоматической архивации')
+    logAutoAction_('AutoArchive', 'Архивация HeroStats', 'Начало')
+    
+    heroStats_archiveOldData()
+    
+    console.log('autoArchiveHeroStats: архивация завершена')
+    logAutoAction_('AutoArchive', 'Архивация HeroStats', 'Завершено')
+    
+  } catch (e) {
+    console.error('autoArchiveHeroStats: ошибка архивации:', e)
+    logAutoAction_('AutoArchive', 'Архивация HeroStats', `Ошибка: ${e.message}`)
+    
+    // Отправляем уведомление в Telegram, если настроено
+    try {
+      const telegramConfig = telegram_getConfig()
+      if (telegramConfig && telegramConfig.botToken && telegramConfig.chatId) {
+        telegram_sendMessage(
+          `⚠️ <b>Ошибка автоматической архивации HeroStats</b>\n\n` +
+          `Ошибка: ${e.message}`,
+          'HTML'
+        )
+      }
+    } catch (telegramError) {
+      // Игнорируем ошибки Telegram
+      console.warn('autoArchiveHeroStats: не удалось отправить уведомление в Telegram:', telegramError)
+    }
+  } finally {
+    releaseLock_(lockKey)
+  }
+}
+
+/**
+ * Автоматическая синхронизация HeroMapping (для триггера)
+ * Синхронизирует предметы из History и автоматически определяет героев для новых предметов
+ */
+function autoSyncHeroMapping() {
+  const lockKey = 'autoSyncHeroMapping'
+  
+  try {
+    // Проверяем блокировку (таймаут 5 минут)
+    const lockResult = acquireLock_(lockKey, LIMITS.LOCK_TIMEOUT_SEC)
+    if (lockResult.locked) {
+      console.warn('autoSyncHeroMapping: операция уже выполняется, пропускаем')
+      return
+    }
+    
+    console.log('autoSyncHeroMapping: начало автоматической синхронизации HeroMapping')
+    logAutoAction_('AutoSync', 'Синхронизация HeroMapping', 'Начало')
+    
+    // 1. Синхронизируем предметы из History
+    try {
+      heroMapping_syncWithHistory()
+      console.log('autoSyncHeroMapping: предметы синхронизированы с History')
+    } catch (e) {
+      console.error('autoSyncHeroMapping: ошибка синхронизации предметов:', e)
+      logAutoAction_('AutoSync', 'Синхронизация предметов', `Ошибка: ${e.message}`)
+      releaseLock_(lockKey)
+      return
+    }
+    
+    // 2. Автоматически определяем героев для новых предметов
+    try {
+      heroMapping_autoDetectFromSteamWebAPI()
+      console.log('autoSyncHeroMapping: герои определены для новых предметов')
+    } catch (e) {
+      console.error('autoSyncHeroMapping: ошибка автоопределения героев:', e)
+      logAutoAction_('AutoSync', 'Автоопределение героев', `Ошибка: ${e.message}`)
+      // Продолжаем выполнение, даже если автоопределение не удалось
+    }
+    
+    console.log('autoSyncHeroMapping: автоматическая синхронизация завершена')
+    logAutoAction_('AutoSync', 'Синхронизация HeroMapping', 'Завершено')
+    
+  } catch (e) {
+    console.error('autoSyncHeroMapping: критическая ошибка:', e)
+    logAutoAction_('AutoSync', 'Синхронизация HeroMapping', `Критическая ошибка: ${e.message}`)
+    
+    // Отправляем уведомление в Telegram, если настроено
+    try {
+      const telegramConfig = telegram_getConfig()
+      if (telegramConfig && telegramConfig.botToken && telegramConfig.chatId) {
+        telegram_sendMessage(
+          `⚠️ <b>Ошибка автоматической синхронизации HeroMapping</b>\n\n` +
+          `Ошибка: ${e.message}`,
+          'HTML'
+        )
+      }
+    } catch (telegramError) {
+      // Игнорируем ошибки Telegram
+      console.warn('autoSyncHeroMapping: не удалось отправить уведомление в Telegram:', telegramError)
+    }
+  } finally {
+    releaseLock_(lockKey)
   }
 }

@@ -346,7 +346,7 @@ function priceHistory_calculateMinMaxForAllItems(onlyMissing = false) {
       if (!batchResult.ok || !batchResult.items) {
         errorCount += batch.length
         console.warn(`PriceHistory: ошибка получения данных для пакета: ${batchResult.error || 'unknown'}`)
-        Utilities.sleep(2000) // Пауза перед следующим пакетом
+        Utilities.sleep(LIMITS.API_BETWEEN_BATCHES_MS)
         continue
       }
       
@@ -477,13 +477,13 @@ function priceHistory_calculateMinMaxForAllItems(onlyMissing = false) {
       
       // Пауза между пакетами (SteamWebAPI.ru может иметь лимиты)
       if (batchStart + batchSize < itemsToProcess.length) {
-        Utilities.sleep(1000) // 1 сек между пакетами достаточно
+        Utilities.sleep(LIMITS.API_BETWEEN_ITEMS_MS)
       }
       
     } catch (e) {
       errorCount += batch.length
       console.error(`PriceHistory: исключение при обработке пакета:`, e)
-      Utilities.sleep(2000)
+      Utilities.sleep(LIMITS.API_BETWEEN_BATCHES_MS)
     }
   }
   

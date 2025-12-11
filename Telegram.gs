@@ -282,7 +282,7 @@ function telegram_checkPriceTargets() {
       const result = telegram_sendMessage(message)
       if (result.ok) {
         notificationsSent++
-        Utilities.sleep(500) // Пауза между сообщениями
+        Utilities.sleep(LIMITS.TELEGRAM_MESSAGE_DELAY_MS)
       }
     }
     
@@ -332,7 +332,7 @@ function telegram_checkDailyPriceTargets() {
   // 1. Отправляем общий отчет о портфеле
   try {
     telegram_sendDailyReport()
-    Utilities.sleep(1000) // Пауза между сообщениями
+    Utilities.sleep(LIMITS.TELEGRAM_REPORT_DELAY_MS)
   } catch (e) {
     console.error('Telegram: критическая ошибка при отправке ежедневного отчета:', e)
     console.error('Stack trace:', e.stack)
@@ -458,7 +458,7 @@ function telegram_checkDailyPriceTargets() {
       messagesFailed++
       console.error(`Telegram: ошибка отправки сообщения о достигших цели: ${result.error}`)
     }
-    Utilities.sleep(1000) // Пауза между сообщениями
+    Utilities.sleep(LIMITS.TELEGRAM_REPORT_DELAY_MS)
   }
   
   // Отправляем второе сообщение: просевшие позиции

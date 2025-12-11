@@ -17,6 +17,11 @@ function heroMapping_formatTable() {
 
   // Заголовки
   const headers = HEADERS.HERO_MAPPING
+  if (!headers || !Array.isArray(headers) || headers.length === 0) {
+    console.error('HeroMapping: HEADERS.HERO_MAPPING не определен или пуст')
+    SpreadsheetApp.getUi().alert('Ошибка: HEADERS.HERO_MAPPING не определен в Constants.gs')
+    return
+  }
   sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
 
   formatHeaderRange_(sheet.getRange(HEADER_ROW, 1, 1, headers.length))
@@ -69,11 +74,7 @@ function heroMapping_formatTable() {
   sheet.setFrozenRows(HEADER_ROW)
   sheet.setFrozenColumns(1) // Замораживаем первую колонку (Item Name)
 
-  try {
-    SpreadsheetApp.getUi().alert('Форматирование завершено (HeroMapping)')
-  } catch (e) {
-    console.log('HeroMapping: невозможно показать UI в данном контексте')
-  }
+  console.log('HeroMapping: форматирование завершено')
 }
 
 /**

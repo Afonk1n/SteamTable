@@ -208,11 +208,27 @@ function applyAnalyticsFormatting_(sheet, config, lastRow) {
  * @returns {number} lastRow - Последняя строка или 0 если ошибка
  */
 function formatTableBase_(sheet, headers, columns, getSheetFn, sheetName) {
-  if (!sheet || !headers || !Array.isArray(headers) || headers.length === 0) {
-    console.error(`${sheetName}: некорректные параметры для форматирования`)
-    if (headers && !Array.isArray(headers)) {
-      SpreadsheetApp.getUi().alert(`Ошибка: заголовки ${sheetName} не определены`)
-    }
+  if (!sheet) {
+    console.error(`${sheetName}: лист не найден`)
+    SpreadsheetApp.getUi().alert(`Ошибка: лист ${sheetName} не найден`)
+    return 0
+  }
+  
+  if (!headers) {
+    console.error(`${sheetName}: заголовки не определены (headers = ${headers})`)
+    SpreadsheetApp.getUi().alert(`Ошибка: заголовки ${sheetName} не определены. Проверьте, что константа HEADERS.${sheetName.toUpperCase()} существует в Constants.gs`)
+    return 0
+  }
+  
+  if (!Array.isArray(headers)) {
+    console.error(`${sheetName}: заголовки не являются массивом (тип: ${typeof headers}, значение: ${headers})`)
+    SpreadsheetApp.getUi().alert(`Ошибка: заголовки ${sheetName} должны быть массивом, но получен ${typeof headers}`)
+    return 0
+  }
+  
+  if (headers.length === 0) {
+    console.error(`${sheetName}: массив заголовков пуст`)
+    SpreadsheetApp.getUi().alert(`Ошибка: массив заголовков ${sheetName} пуст`)
     return 0
   }
   

@@ -21,9 +21,8 @@ function sales_formatNewRow_(sheet, row) {
   
   formatNewRowUniversal_(sheet, row, SALES_CONFIG, numberFormatConfig, true)
   
-  // Специальное форматирование колонки Потенциал (K) как процент с знаком "+"
-  const potentialCol = getColumnIndex(SALES_COLUMNS.POTENTIAL)
-  sheet.getRange(row, potentialCol).setNumberFormat('+0%;-0%;"—"')
+  // ПРИМЕЧАНИЕ: В Sales нет колонки POTENTIAL, это поле было удалено из структуры
+  // Если нужно добавить форматирование для других колонок, используйте соответствующие поля из SALES_COLUMNS
 }
 
 // Функции getSalesSheet_ и getOrCreateSalesSheet_ перенесены в SheetService.gs
@@ -90,10 +89,30 @@ function sales_formatTable() {
   const sheet = getOrCreateSalesSheet_()
   const headers = HEADERS.SALES // 19 колонок (новая структура)
   
+  if (!headers || !Array.isArray(headers) || headers.length === 0) {
+    console.error('Sales: HEADERS.SALES не определен или пуст')
+    SpreadsheetApp.getUi().alert('Ошибка: HEADERS.SALES не определен в Constants.gs')
+    return
+  }
+  
+  // Проверка SALES_COLUMNS перед использованием
+  if (!SALES_COLUMNS) {
+    console.error('Sales: SALES_COLUMNS не определен')
+    SpreadsheetApp.getUi().alert('Ошибка: SALES_COLUMNS не определен в Constants.gs')
+    return
+  }
+  
   // Базовое форматирование таблицы
   const lastRow = formatTableBase_(sheet, headers, SALES_COLUMNS, getSalesSheet_, 'Sales')
   if (lastRow === 0) return
 
+  // Проверка COLUMN_WIDTHS перед использованием
+  if (!COLUMN_WIDTHS) {
+    console.error('Sales: COLUMN_WIDTHS не определен')
+    SpreadsheetApp.getUi().alert('Ошибка: COLUMN_WIDTHS не определен в Constants.gs')
+    return
+  }
+  
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.IMAGE), COLUMN_WIDTHS.IMAGE)
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.NAME), COLUMN_WIDTHS.NAME)
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.QUANTITY), COLUMN_WIDTHS.MEDIUM) // C
@@ -111,6 +130,13 @@ function sales_formatTable() {
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // S
 
   if (lastRow > 1) {
+    // Дополнительная проверка headers перед использованием
+    if (!headers || !Array.isArray(headers)) {
+      console.error('Sales: headers потеряны после formatTableBase_')
+      SpreadsheetApp.getUi().alert('Ошибка: заголовки Sales потеряны. Попробуйте запустить форматирование еще раз.')
+      return
+    }
+    
     sheet.getRange(`C2:F${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // C-F: Количество, Цена продажи, Текущая цена, Просадка
     sheet.getRange(`G2:G${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // G: Процент просадки
     sheet.getRange(`I2:J${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // I-J: Min, Max
@@ -125,10 +151,25 @@ function sales_formatTable() {
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
 
     const dropRange = sheet.getRange(`F2:G${lastRow}`) // Просадка и Процент просадки
+    
+    // Проверка SALES_COLUMNS перед использованием
+    if (!SALES_COLUMNS) {
+      console.error('Sales: SALES_COLUMNS не определен')
+      SpreadsheetApp.getUi().alert('Ошибка: SALES_COLUMNS не определен в Constants.gs')
+      return
+    }
+    
     const recommendationCol = getColumnIndex(SALES_COLUMNS.RECOMMENDATION)
+    if (recommendationCol <= 0) {
+      console.error('Sales: не удалось определить колонку RECOMMENDATION')
+    }
     
     // Условное форматирование для просадки
     const dropPercentCol = getColumnIndex(SALES_COLUMNS.PRICE_DROP_PERCENT)
+    if (dropPercentCol <= 0) {
+      console.error('Sales: не удалось определить колонку PRICE_DROP_PERCENT')
+      return
+    }
     const dropPercentRange = sheet.getRange(DATA_START_ROW, dropPercentCol, lastRow - 1, 1)
     
     // Зеленый для положительной просадки (цена выросла)
@@ -152,7 +193,7 @@ function sales_formatTable() {
   }
 
   // Заморозка строки уже выполнена в formatTableBase_()
-  SpreadsheetApp.getUi().alert('Форматирование завершено (Sales)')
+  console.log('Sales: форматирование завершено')
 }
 
 
@@ -182,8 +223,6 @@ function sales_syncTrendDaysFromHistory(updateAll = true) {
   // SALES_COLUMNS.TREND больше не используется в новой структуре (удалена)
   // Тренд синхронизируется из History, но в Sales нет отдельной колонки для него
   return true
-  
-  return syncTrendFromHistoryUniversal_(sheet, trendColIndex, updateAll)
 }
 
 // Синхронизация расширенной аналитики (Фаза/Потенциал/Рекомендация) из History
@@ -196,7 +235,8 @@ function sales_syncExtendedAnalyticsFromHistory(updateAll = true) {
   const recommendationColIndex = getColumnIndex(SALES_COLUMNS.RECOMMENDATION)
   
   // Синхронизируем только Рекомендацию из History
-  return syncRecommendationFromHistoryUniversal_(sheet, recommendationColIndex, updateAll)
+  // Используем универсальную функцию с null для phase и potential
+  return syncExtendedAnalyticsFromHistoryUniversal_(sheet, null, null, recommendationColIndex, updateAll)
 }
 
 /**
@@ -235,7 +275,7 @@ function sales_updateMetricsFromSteamWebAPI(itemNames) {
     }
     // Задержка между batch запросами
     if (i + batchSize < itemNames.length) {
-      Utilities.sleep(500)
+      Utilities.sleep(LIMITS.METRICS_UPDATE_DELAY_MS)
     }
   }
   
@@ -264,14 +304,38 @@ function sales_calculateAllMetrics() {
   // Получаем историю цен из History
   const historySheet = getHistorySheet_()
   
-  // Обновляем метрики для каждой строки
+  // Подготовка данных для batch-операций
+  const liquidityScores = []
+  const demandRatios = []
+  const priceMomenta = []
+  const salesTrends = []
+  const volatilityIndices = []
+  const heroTrends = []
+  const historyNames = historySheet ? historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues() : []
+  
+  // Рассчитываем метрики для всех строк
   for (let i = 0; i < itemNames.length; i++) {
     const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) continue
+    if (!itemName) {
+      liquidityScores.push([null])
+      demandRatios.push([null])
+      priceMomenta.push([null])
+      salesTrends.push([null])
+      volatilityIndices.push([null])
+      heroTrends.push([null])
+      continue
+    }
     
-    const row = DATA_START_ROW + i
     const itemData = itemsData[itemName]
-    if (!itemData) continue
+    if (!itemData) {
+      liquidityScores.push([null])
+      demandRatios.push([null])
+      priceMomenta.push([null])
+      salesTrends.push([null])
+      volatilityIndices.push([null])
+      heroTrends.push([null])
+      continue
+    }
     
     const mapping = mappings[itemName]
     const heroId = mapping && mapping.heroId ? mapping.heroId : null
@@ -279,36 +343,42 @@ function sales_calculateAllMetrics() {
     
     // Получаем историю цен
     let historyData = null
-    if (historySheet) {
-      const historyRow = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues().findIndex(r => String(r[0] || '').trim() === itemName)
-      if (historyRow >= 0) {
-        historyData = history_getPriceHistoryForItem_(historySheet, historyRow + DATA_START_ROW)
+    if (historySheet && historyNames.length > 0) {
+      const historyRowIndex = historyNames.findIndex(r => String(r[0] || '').trim() === itemName)
+      if (historyRowIndex >= 0) {
+        historyData = history_getPriceHistoryForItem_(historySheet, historyRowIndex + DATA_START_ROW)
       }
     }
     
     // Рассчитываем метрики
-    const liquidityScore = analytics_calculateLiquidityScore(itemData)
-    const demandRatio = analytics_calculateDemandRatio(itemData)
-    const priceMomentum = analytics_calculatePriceMomentum(itemData, historyData)
-    const salesTrend = analytics_calculateSalesTrend(itemData)
-    const volatilityIndex = analytics_calculateVolatilityIndex(itemData, historyData)
-    
-    // Обновляем колонки метрик
-    sheet.getRange(row, getColumnIndex(SALES_COLUMNS.LIQUIDITY_SCORE)).setValue(liquidityScore)
-    sheet.getRange(row, getColumnIndex(SALES_COLUMNS.DEMAND_RATIO)).setValue(demandRatio)
-    sheet.getRange(row, getColumnIndex(SALES_COLUMNS.PRICE_MOMENTUM)).setValue(priceMomentum)
-    sheet.getRange(row, getColumnIndex(SALES_COLUMNS.SALES_TREND)).setValue(salesTrend)
-    sheet.getRange(row, getColumnIndex(SALES_COLUMNS.VOLATILITY_INDEX)).setValue(volatilityIndex)
+    liquidityScores.push([analytics_calculateLiquidityScore(itemData)])
+    demandRatios.push([analytics_calculateDemandRatio(itemData)])
+    priceMomenta.push([analytics_calculatePriceMomentum(itemData, historyData)])
+    salesTrends.push([analytics_calculateSalesTrend(itemData)])
+    volatilityIndices.push([analytics_calculateVolatilityIndex(itemData, historyData)])
     
     // Hero Trend Score (только для Hero Items)
+    let heroTrendValue = null
     if (heroId && rankCategory) {
       const latestStats = heroStats_getLatestStats(heroId, rankCategory)
       if (latestStats) {
         const heroStatsObj = {[rankCategory]: latestStats}
         const heroTrendScore = analytics_calculateHeroTrendScore(heroId, rankCategory, heroStatsObj)
-        sheet.getRange(row, getColumnIndex(SALES_COLUMNS.HERO_TREND)).setValue(analytics_formatScore(heroTrendScore))
+        heroTrendValue = analytics_formatScore(heroTrendScore)
       }
     }
+    heroTrends.push([heroTrendValue])
+  }
+  
+  // Batch-запись всех метрик
+  const count = liquidityScores.length
+  if (count > 0) {
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.LIQUIDITY_SCORE), count, 1).setValues(liquidityScores)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.DEMAND_RATIO), count, 1).setValues(demandRatios)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.PRICE_MOMENTUM), count, 1).setValues(priceMomenta)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.SALES_TREND), count, 1).setValues(salesTrends)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.VOLATILITY_INDEX), count, 1).setValues(volatilityIndices)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.HERO_TREND), count, 1).setValues(heroTrends)
   }
 }
 
@@ -334,31 +404,51 @@ function sales_updateBuybackScores() {
   // Получаем историю цен из History
   const historySheet = getHistorySheet_()
   
-  // Обновляем Buyback Score для каждой строки
+  // Читаем цены продажи и текущие цены batch-операцией
+  const sellPrices = sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.SELL_PRICE), lastRow - HEADER_ROW, 1).getValues()
+  const currentPrices = sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.CURRENT_PRICE), lastRow - HEADER_ROW, 1).getValues()
+  const historyNames = historySheet ? historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues() : []
+  
+  // Подготовка данных для batch-операций
+  const buybackScores = []
+  const riskLevels = []
+  
+  // Рассчитываем Buyback Score и Risk Level для всех строк
   for (let i = 0; i < itemNames.length; i++) {
     const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) continue
+    if (!itemName) {
+      buybackScores.push([null])
+      riskLevels.push([null])
+      continue
+    }
     
-    const row = DATA_START_ROW + i
     const itemData = itemsData[itemName]
-    if (!itemData) continue
+    if (!itemData) {
+      buybackScores.push([null])
+      riskLevels.push([null])
+      continue
+    }
+    
+    // Получаем цену продажи и текущую цену
+    const sellPrice = Number(sellPrices[i][0]) || 0
+    const currentPrice = Number(currentPrices[i][0]) || 0
+    
+    if (!sellPrice || !currentPrice) {
+      buybackScores.push([null])
+      riskLevels.push([null])
+      continue
+    }
     
     const mapping = mappings[itemName]
     const heroId = mapping && mapping.heroId ? mapping.heroId : null
     const rankCategory = mapping && mapping.heroId ? 'High Rank' : null
     
-    // Получаем цену продажи и текущую цену
-    const sellPrice = Number(sheet.getRange(row, getColumnIndex(SALES_COLUMNS.SELL_PRICE)).getValue()) || 0
-    const currentPrice = Number(sheet.getRange(row, getColumnIndex(SALES_COLUMNS.CURRENT_PRICE)).getValue()) || 0
-    
-    if (!sellPrice || !currentPrice) continue
-    
     // Получаем историю цен
     let historyData = null
-    if (historySheet) {
-      const historyRow = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues().findIndex(r => String(r[0] || '').trim() === itemName)
-      if (historyRow >= 0) {
-        historyData = history_getPriceHistoryForItem_(historySheet, historyRow + DATA_START_ROW)
+    if (historySheet && historyNames.length > 0) {
+      const historyRowIndex = historyNames.findIndex(r => String(r[0] || '').trim() === itemName)
+      if (historyRowIndex >= 0) {
+        historyData = history_getPriceHistoryForItem_(historySheet, historyRowIndex + DATA_START_ROW)
       }
     }
     
@@ -382,15 +472,20 @@ function sales_updateBuybackScores() {
       rankCategory
     )
     
-    // Обновляем колонку Buyback Score
-    sheet.getRange(row, getColumnIndex(SALES_COLUMNS.BUYBACK_SCORE))
-      .setValue(analytics_formatScore(buybackScore))
+    buybackScores.push([analytics_formatScore(buybackScore)])
     
     // Рассчитываем Risk Level
     const volatilityIndex = analytics_calculateVolatilityIndex(itemData, historyData)
     const demandRatio = analytics_calculateDemandRatio(itemData)
     const riskLevel = analytics_calculateRiskLevel(buybackScore, volatilityIndex, demandRatio)
-    sheet.getRange(row, getColumnIndex(SALES_COLUMNS.RISK_LEVEL)).setValue(riskLevel)
+    riskLevels.push([riskLevel])
+  }
+  
+  // Batch-запись Buyback Scores и Risk Levels
+  const count = buybackScores.length
+  if (count > 0) {
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.BUYBACK_SCORE), count, 1).setValues(buybackScores)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.RISK_LEVEL), count, 1).setValues(riskLevels)
   }
 }
 
@@ -425,3 +520,4 @@ function sales_generateRecommendation(row) {
   }
   return `👀 НАБЛЮДАТЬ (Score: ${(buybackScore * 100).toFixed(0)}%)`
 }
+

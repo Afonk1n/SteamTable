@@ -63,8 +63,11 @@ function openDota_fetchHeroStats(rankTier = null) {
                          (hero['4_win'] || 0) + (hero['5_win'] || 0) + highRankWin
       const allRanksWinRate = allRanksPick > 0 ? (allRanksWin / allRanksPick) * 100 : 0
       
-      // Ban rate доступен только для про-матчей (pro_ban / pro_pick)
-      const proBanRate = hero.pro_pick > 0 ? ((hero.pro_ban || 0) / hero.pro_pick) * 100 : 0
+      // Про-статистика (pro_pick, pro_ban)
+      const proPick = hero.pro_pick || 0
+      const proBan = hero.pro_ban || 0
+      const proBanRate = proPick > 0 ? (proBan / proPick) * 100 : 0
+      const proContestRate = proPick + proBan // Контест рейт для про-матчей
       
       // Pick rate - это абсолютное количество пиков (для нормализации потребуется общая сумма всех пиков)
       // Для текущей реализации используем абсолютные значения
@@ -78,16 +81,24 @@ function openDota_fetchHeroStats(rankTier = null) {
           pickRate: highRankPick, // Абсолютное значение (пиков)
           winRate: highRankWinRate, // Процент побед
           banRate: proBanRate, // Процент баннов (из про-матчей)
-          contestRate: highRankPick + (hero.pro_ban || 0), // Абсолютное значение (пики + баны)
-          matchCount: highRankPick
+          contestRate: highRankPick + proBan, // Абсолютное значение (пики + баны)
+          matchCount: highRankPick,
+          // Про-статистика
+          proPick: proPick,
+          proBan: proBan,
+          proContestRate: proContestRate
         },
         // All Ranks статистика
         allRanks: {
           pickRate: allRanksPick, // Абсолютное значение (пиков)
           winRate: allRanksWinRate, // Процент побед
           banRate: proBanRate, // Процент баннов (из про-матчей)
-          contestRate: allRanksPick + (hero.pro_ban || 0), // Абсолютное значение (пики + баны)
-          matchCount: allRanksPick
+          contestRate: allRanksPick + proBan, // Абсолютное значение (пики + баны)
+          matchCount: allRanksPick,
+          // Про-статистика
+          proPick: proPick,
+          proBan: proBan,
+          proContestRate: proContestRate
         }
       }
     })
@@ -124,7 +135,11 @@ function openDota_fetchAllHeroStats() {
         winRate: hero.highRank.winRate,
         banRate: hero.highRank.banRate,
         contestRate: hero.highRank.contestRate,
-        matchCount: hero.highRank.matchCount
+        matchCount: hero.highRank.matchCount,
+        // Про-статистика
+        proPick: hero.highRank.proPick || 0,
+        proBan: hero.highRank.proBan || 0,
+        proContestRate: hero.highRank.proContestRate || 0
       })
     }
     
@@ -136,7 +151,11 @@ function openDota_fetchAllHeroStats() {
         winRate: hero.allRanks.winRate,
         banRate: hero.allRanks.banRate,
         contestRate: hero.allRanks.contestRate,
-        matchCount: hero.allRanks.matchCount
+        matchCount: hero.allRanks.matchCount,
+        // Про-статистика
+        proPick: hero.allRanks.proPick || 0,
+        proBan: hero.allRanks.proBan || 0,
+        proContestRate: hero.allRanks.proContestRate || 0
       })
     }
   })

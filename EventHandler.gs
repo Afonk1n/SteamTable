@@ -28,7 +28,7 @@ function onEdit(e) {
     if (isChecked) {
       try {
         handleBuyFromHistory_(sheet, row)
-        Utilities.sleep(100)
+        Utilities.sleep(LIMITS.EVENT_HANDLER_DELAY_MS)
         sheet.getRange(row, col).setValue(false)
       } catch (error) {
         console.error('EventHandler: ошибка при обработке покупки:', error)
@@ -45,7 +45,7 @@ function onEdit(e) {
     if (isChecked) {
       try {
         handleSellFromInvest_(sheet, row)
-        Utilities.sleep(100)
+        Utilities.sleep(LIMITS.EVENT_HANDLER_DELAY_MS)
         sheet.getRange(row, col).setValue(false)
       } catch (error) {
         console.error('EventHandler: ошибка при обработке продажи:', error)

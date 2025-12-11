@@ -19,6 +19,11 @@ function heroStats_formatTable() {
 
   // Заголовки фиксированных колонок
   const headers = HEADERS.HERO_STATS
+  if (!headers || !Array.isArray(headers) || headers.length === 0) {
+    console.error('HeroStats: HEADERS.HERO_STATS не определен или пуст')
+    SpreadsheetApp.getUi().alert('Ошибка: HEADERS.HERO_STATS не определен в Constants.gs')
+    return
+  }
   sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
 
   formatHeaderRange_(sheet.getRange(HEADER_ROW, 1, 1, headers.length))
@@ -53,11 +58,7 @@ function heroStats_formatTable() {
   // Форматируем все существующие динамические колонки
   heroStats_formatAllDataColumns_(sheet)
 
-  try {
-    SpreadsheetApp.getUi().alert('Форматирование завершено (HeroStats)')
-  } catch (e) {
-    console.log('HeroStats: невозможно показать UI в данном контексте')
-  }
+  console.log('HeroStats: форматирование завершено')
 }
 
 /**
@@ -420,12 +421,36 @@ function heroStats_updateAllStats() {
             'High Rank'
           )
           
+          // Получаем статистику 7 дней назад для расчета изменений
+          const stats7DaysAgo = heroStats_getStats7DaysAgo(heroStat.heroId, 'High Rank')
+          
+          // Рассчитываем contestRateChange7d
+          let contestRateChange7d = 0
+          if (stats7DaysAgo && stats7DaysAgo.contestRate && stats7DaysAgo.contestRate > 0) {
+            const currentContestRate = heroStat.contestRate || 0
+            contestRateChange7d = ((currentContestRate - stats7DaysAgo.contestRate) / stats7DaysAgo.contestRate) * 100
+          }
+          
+          // Рассчитываем proContestRateChange7d
+          let proContestRateChange7d = 0
+          const currentProContestRate = heroStat.proContestRate || 0
+          if (stats7DaysAgo && stats7DaysAgo.proContestRate && stats7DaysAgo.proContestRate > 0) {
+            proContestRateChange7d = ((currentProContestRate - stats7DaysAgo.proContestRate) / stats7DaysAgo.proContestRate) * 100
+          }
+          
           const statsData = {
             pickRate: heroStat.pickRate || 0,
             winRate: heroStat.winRate || 0,
             banRate: heroStat.banRate || 0,
             contestRate: heroStat.contestRate || 0,
-            matchCount: heroStat.matchCount || 0
+            matchCount: heroStat.matchCount || 0,
+            // Про-статистика
+            proPick: heroStat.proPick || 0,
+            proBan: heroStat.proBan || 0,
+            proContestRate: currentProContestRate,
+            // Изменения за 7 дней
+            contestRateChange7d: contestRateChange7d,
+            proContestRateChange7d: proContestRateChange7d
           }
           
           heroStats_setStatsData(row, dataCol, statsData)
@@ -447,12 +472,36 @@ function heroStats_updateAllStats() {
             'All Ranks'
           )
           
+          // Получаем статистику 7 дней назад для расчета изменений
+          const stats7DaysAgo = heroStats_getStats7DaysAgo(heroStat.heroId, 'All Ranks')
+          
+          // Рассчитываем contestRateChange7d
+          let contestRateChange7d = 0
+          if (stats7DaysAgo && stats7DaysAgo.contestRate && stats7DaysAgo.contestRate > 0) {
+            const currentContestRate = heroStat.contestRate || 0
+            contestRateChange7d = ((currentContestRate - stats7DaysAgo.contestRate) / stats7DaysAgo.contestRate) * 100
+          }
+          
+          // Рассчитываем proContestRateChange7d
+          let proContestRateChange7d = 0
+          const currentProContestRate = heroStat.proContestRate || 0
+          if (stats7DaysAgo && stats7DaysAgo.proContestRate && stats7DaysAgo.proContestRate > 0) {
+            proContestRateChange7d = ((currentProContestRate - stats7DaysAgo.proContestRate) / stats7DaysAgo.proContestRate) * 100
+          }
+          
           const statsData = {
             pickRate: heroStat.pickRate || 0,
             winRate: heroStat.winRate || 0,
             banRate: heroStat.banRate || 0,
             contestRate: heroStat.contestRate || 0,
-            matchCount: heroStat.matchCount || 0
+            matchCount: heroStat.matchCount || 0,
+            // Про-статистика
+            proPick: heroStat.proPick || 0,
+            proBan: heroStat.proBan || 0,
+            proContestRate: currentProContestRate,
+            // Изменения за 7 дней
+            contestRateChange7d: contestRateChange7d,
+            proContestRateChange7d: proContestRateChange7d
           }
           
           heroStats_setStatsData(row, dataCol, statsData)

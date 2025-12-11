@@ -2,6 +2,8 @@
 
 > **Назначение**: Этот документ предназначен для AI агентов и содержит актуальную техническую информацию о структуре проекта, функциях, логике работы и важных деталях реализации.
 
+> **Сценарий настройки**: Полный сценарий настройки новой таблицы от пустой до полностью рабочей описан в `SETUP_SCENARIO.md`.
+
 ---
 
 ## ПРАВИЛА РАБОТЫ С ДОКУМЕНТАЦИЕЙ
@@ -141,6 +143,9 @@ History (сохранение цен по датам)
 2. **12:00** - `history_createPeriodAndUpdate_evening()` создает колонку периода "день" и начинает сбор цен
 3. **Каждые 10 минут** - `unified_priceUpdate()` продолжает сбор цен до завершения периода
 4. **13:00** - `telegram_checkDailyPriceTargets()` отправляет ежедневные уведомления
+5. **08:00, 14:00, 20:00** - `autoUpdateHeroStats()` автоматическое обновление статистики героев и скоров
+6. **04:00** - `autoSyncHeroMapping()` автоматическая синхронизация HeroMapping с History
+7. **Воскресенье 03:00** - `autoArchiveHeroStats()` автоматическая архивация старых данных HeroStats (старше 90 дней)
 
 **Периоды сбора цен**:
 - **"ночь"**: 00:10 - 12:00 (техническое название для периода 00:10-12:00)
@@ -150,9 +155,25 @@ History (сохранение цен по датам)
 Когда сбор цен завершен (`historyCompleted === true`):
 1. Обновляется аналитика в History (тренды, фазы, min/max)
 2. Синхронизируется аналитика в Invest/Sales
-3. Если период === "день" → сохраняется история в PortfolioStats
+3. Если период === "день" → сохраняется история в PortfolioStats и обновляются Investment/Buyback Scores
 
-**Важно**: Аналитика Invest/Sales обновляется автоматически внутри `syncPricesFromHistoryToInvestAndSales()`, поэтому при завершении периода вызывается только сохранение истории портфеля.
+**Важно**: Аналитика Invest/Sales обновляется автоматически внутри `syncPricesFromHistoryToInvestAndSales()`, поэтому при завершении периода вызывается только сохранение истории портфеля. После завершения дневного сбора автоматически обновляются Investment Scores для History и Invest, а также Buyback Scores для Sales.
+
+**Автоматическое обновление статистики героев**:
+Когда `autoUpdateHeroStats()` выполняется (3 раза в день):
+1. Обновляется статистика героев через OpenDota API (`heroStats_updateAllStats()`)
+2. Синхронизируется статистика в History (`history_syncHeroStats()`)
+3. Обновляются Investment Scores для History и Invest (`history_updateInvestmentScores()`, `invest_updateInvestmentScores()`)
+4. Обновляются Buyback Scores для Sales (`sales_updateBuybackScores()`)
+
+**Автоматическая синхронизация HeroMapping**:
+Когда `autoSyncHeroMapping()` выполняется (ежедневно в 04:00):
+1. Синхронизируются предметы из History с HeroMapping (`heroMapping_syncWithHistory()`)
+2. Автоматически определяются герои для новых предметов (`heroMapping_autoDetectFromSteamWebAPI()`)
+
+**Автоматическая архивация данных**:
+Когда `autoArchiveHeroStats()` выполняется (воскресенье в 03:00):
+1. Удаляются данные старше HERO_STATS_HISTORY_DAYS (90 дней) из HeroStats (`heroStats_archiveOldData()`)
 
 ### Синхронизация данных
 
@@ -270,11 +291,13 @@ History (сохранение цен по датам)
 
 **Динамические колонки (D+):**
 - Заголовок: `"DD.MM.YY HH:MM"` (дата и время обновления)
-- Данные: JSON строка с статистикой `{pickRate, winRate, banRate, contestRate, matchCount}`
+- Данные: JSON строка с статистикой `{pickRate, winRate, banRate, contestRate, matchCount, proPick, proBan, proContestRate, contestRateChange7d, proContestRateChange7d}`
 
 **Особенности**:
 - Две строки для каждого героя: одна для "High Rank", вторая для "All Ranks"
 - Данные хранятся в JSON формате для компактности
+- Включает про-статистику (`proPick`, `proBan`, `proContestRate`) из OpenDota API
+- Автоматический расчет изменений за 7 дней (`contestRateChange7d`, `proContestRateChange7d`)
 - Автоматическое архивирование данных старше 90 дней
 
 ### HeroMapping (маппинг предметов на героев)
@@ -313,6 +336,8 @@ History (сохранение цен по датам)
 - `history_updateCurrentPriceMinMax_(sheet)` - Обновление столбцов Текущая цена, Min, Max
   - Окрашивает устаревшие цены в желтый (COLORS.STABLE), если цена не за текущий период
   - Вызывается сразу после создания новой колонки периода для визуализации устаревших цен
+  - **Логика Min/Max:** Min/Max получаются из SteamWebAPI один раз при первоначальной настройке. При обновлении цен проверяет: если новая цена < Min или > Max - обновляет только тогда. Не перезаписывает Min/Max из колонок дат каждый раз.
+  - Fallback: если Min/Max не установлены из SteamWebAPI, вычисляет из существующих цен в колонках
 - `history_calculateDaysChange_(prices, dates, currentTrend)` - Расчет дней смены тренда
   - Использует разницу между реальными датами (Math.floor), а не количество записей
   - Требует, чтобы dates были уже сгруппированы по дате (одна запись на день)
@@ -376,11 +401,15 @@ History (сохранение цен по датам)
 - `history_createPeriodAndUpdate()` - Создание колонки периода и обновление цен (вызывается триггерами в 00:00 и 12:00)
   - При создании новой колонки: логирует начало обновления в AutoLog, обновляет текущие цены (окраска устаревших в желтый)
 - `unified_priceUpdate()` - Продолжение сбора цен каждые 10 минут до завершения периода
+- `updateAllMetricsForInvestSales()` - Универсальное обновление всех метрик для Invest и Sales
+  - Вызывает расчет метрик (Liquidity, Demand, Momentum, Sales Trend, Volatility, Hero Trend) для всех позиций
+  - Используется автоматически после синхронизации цен и вручную через меню
 - `syncPricesFromHistoryToInvestAndSales()` - Синхронизация цен из History в Invest/Sales
   - Читает данные History один раз через `readHistoryDataForSync_()` для оптимизации
   - Вызывает `syncInvestPricesFromHistory_()` и `syncSalesPricesFromHistory_()` с общими данными
   - Автоматически вызывает batch-расчеты прибыли/просадки
   - Автоматически обновляет аналитику: `invest_syncMinMaxFromHistory()`, `invest_syncTrendDaysFromHistory()`, `invest_syncExtendedAnalyticsFromHistory()`, и аналогично для Sales
+  - Автоматически вызывает `updateAllMetricsForInvestSales()` для расчета метрик после синхронизации цен
 - `readHistoryDataForSync_(historySheet)` - Универсальная функция для чтения данных History (оптимизация)
 - `getCurrentPriceFromHistoryData_(historyData)` - Универсальная функция для получения текущей цены из данных History
 - `isPriceOutdated_(historyData)` - Универсальная функция для определения устаревшей цены
@@ -430,8 +459,10 @@ History (сохранение цен по датам)
 
 ### OpenDotaAPI
 
-- `openDota_fetchHeroStats(rankTier)` - Получение статистики героев (пикрейт, винрейт, банрейт)
+- `openDota_fetchHeroStats(rankTier)` - Получение статистики героев (пикрейт, винрейт, банрейт, про-статистика)
+  - Возвращает про-статистику: `proPick`, `proBan`, `proContestRate` для каждой категории ранга
 - `openDota_fetchAllHeroStats()` - Получение статистики для обеих категорий (High Rank + All Ranks)
+  - Включает про-статистику (`proPick`, `proBan`, `proContestRate`) для каждой категории
 - `openDota_testConnection()` - Тест подключения к API
 
 ### Telegram
@@ -452,10 +483,38 @@ History (сохранение цен по датам)
 ### Menu
 
 - `onOpen()` - Создание меню при открытии таблицы
-- `setupAllTriggers()` - Создание всех триггеров (включая Telegram)
+- `setupAllTriggers()` - Создание всех триггеров (включая автоматическое обновление статистики героев, синхронизацию HeroMapping, архивацию данных и Telegram)
 - `removeAllTriggers()` - Удаление всех триггеров
 - `initializeAllTables()` - Инициализация всех таблиц (форматирование)
-- `syncAnalyticsForInvestSales_()` - Ручная синхронизация аналитики Invest/Sales
+- `performInitialSetup()` - Первоначальная настройка новой таблицы (Min/Max, HeroMapping, статистика героев) - с диалогами для каждого шага
+- `performFullSetup()` - Полная настройка - последовательно вызывает все шаги (setupMinMax → setupHeroMapping → setupHeroStats → setupAnalytics)
+- `setupMinMax()` - Шаг 0: Расчет Min/Max из SteamWebAPI для отсутствующих предметов (опционально, выполняется автоматически в performFullSetup)
+- `setupHeroMapping()` - Шаг 1: Синхронизация HeroMapping с History и автоопределение героев
+- `setupHeroStats()` - Шаг 2: Обновление статистики героев через OpenDota API и синхронизация в History
+- `setupAnalytics()` - Шаг 3: Обновление аналитики History (включая Min/Max из существующих цен) и Investment Scores
+- `checkSystemReadiness()` - Проверка готовности системы (наличие данных, заполненность Min/Max, наличие HeroMapping и HeroStats)
+- `checkAutomationStatus()` - Проверка состояния автоматизации (активные триггеры, последние выполнения)
+- `syncAnalyticsForInvestSales_()` - Ручная синхронизация аналитики Invest/Sales (Min/Max, Тренд, Фаза/Потенциал/Рекомендация)
+  - Автоматически вызывает `updateAllMetricsForInvestSales()` для расчета метрик после синхронизации
+- `updateAllMetricsAndScores_()` - Комплексное обновление всех метрик и скоров для Invest/Sales/History
+  - Обновляет метрики (Liquidity, Demand, Momentum, Sales Trend, Volatility) для Invest/Sales
+  - Обновляет Investment Scores для History и Invest
+  - Обновляет Buyback Scores для Sales
+  - Синхронизирует статистику героев
+- `autoUpdateHeroStats()` - Автоматическое обновление статистики героев (для триггера)
+  - Выполняет полный цикл: обновление статистики → синхронизация в History → обновление Investment Scores → обновление Buyback Scores
+  - Использует блокировку для предотвращения параллельного выполнения
+  - Логирует все действия в AutoLog
+  - Отправляет уведомления в Telegram при критических ошибках
+- `autoArchiveHeroStats()` - Автоматическая архивация старых данных HeroStats (для триггера)
+  - Удаляет данные старше 90 дней
+  - Использует блокировку для предотвращения параллельного выполнения
+  - Логирует действия в AutoLog
+- `autoSyncHeroMapping()` - Автоматическая синхронизация HeroMapping (для триггера)
+  - Синхронизирует предметы из History
+  - Автоматически определяет героев для новых предметов
+  - Использует блокировку для предотвращения параллельного выполнения
+  - Логирует действия в AutoLog
 
 ### EventHandler
 
@@ -513,7 +572,25 @@ LIMITS = {
   BASE_DELAY_MS: 200,      // Базовая задержка
   BETWEEN_ITEMS_MS: 150,   // Задержка между предметами
   LOCK_TIMEOUT_SEC: 300,   // Таймаут блокировки (5 минут)
-  ERROR_MESSAGE_MAX_LENGTH: 200  // Максимальная длина сообщения об ошибке
+  ERROR_MESSAGE_MAX_LENGTH: 200,  // Максимальная длина сообщения об ошибке
+  // Дополнительные задержки
+  API_RETRY_DELAY_MS: 500,  // Задержка между повторными попытками API
+  API_BETWEEN_ITEMS_MS: 1000,  // Задержка между предметами при batch запросах
+  API_BETWEEN_BATCHES_MS: 2000,  // Задержка между пакетами запросов
+  TELEGRAM_MESSAGE_DELAY_MS: 500,  // Задержка между сообщениями Telegram
+  TELEGRAM_REPORT_DELAY_MS: 1000,  // Задержка между отчетами Telegram
+  EVENT_HANDLER_DELAY_MS: 100,  // Задержка в обработчике событий
+  HISTORY_UPDATE_DELAY_MS: 100,  // Задержка при обновлении History
+  METRICS_UPDATE_DELAY_MS: 500,  // Задержка при обновлении метрик
+  // Таймауты для операций
+  SAFETY_BUFFER_MS: 1000,  // Буфер безопасности перед превышением таймаута
+  MIN_INTERVAL_MS: 100,  // Минимальный интервал между запросами
+  MAX_ERROR_DELAY_MS: 250,  // Максимальная задержка при ошибках
+  // Размеры колонок для логов
+  LOG_COLUMN_WIDTHS: {
+    AUTO_LOG: [150, 100, 200, 100],  // Дата/время, Лист, Действие, Статус
+    LOG: [150, 90, 120, 250, 90, 120, 120, 120]  // Дата/время, Тип, Изображение, Предмет, Кол-во, Цена за шт, Сумма, Источник
+  }
 }
 
 API_CONFIG = {
@@ -739,6 +816,8 @@ avgProfitability = средняя прибыльность всех позици
 - Тест Telegram
 - Тест ежедневных уведомлений
 
-### Общие функции
+### Подменю Синхронизация
 - Синхронизировать цены из History
-- Обновить аналитику Invest/Sales
+- Обновить аналитику Invest/Sales (включает автоматический расчет метрик)
+- Обновить метрики Invest/Sales (ручное обновление метрик)
+- Обновить все метрики и скоры

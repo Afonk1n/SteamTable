@@ -12,6 +12,11 @@ function history_formatTable() {
 
   // Используем константы для заголовков
   const headers = HEADERS.HISTORY
+  if (!headers || !Array.isArray(headers) || headers.length === 0) {
+    console.error('History: HEADERS.HISTORY не определен или пуст')
+    SpreadsheetApp.getUi().alert('Ошибка: HEADERS.HISTORY не определен в Constants.gs')
+    return
+  }
   sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers])
 
   formatHeaderRange_(sheet.getRange(HEADER_ROW, 1, 1, headers.length))
@@ -98,11 +103,7 @@ function history_formatTable() {
     rng.setHorizontalAlignment('center')
     sheet.setColumnWidth(5, 100)
   }
-  try {
-    SpreadsheetApp.getUi().alert('Форматирование завершено (History)')
-  } catch (e) {
-    console.log('History: невозможно показать UI в данном контексте')
-  }
+  console.log('History: форматирование завершено')
   // Безопасная очистка/установка правил условного форматирования при пустом листе
   if (lastRow2 <= 1) {
     sheet.setConditionalFormatRules([])
@@ -424,7 +425,7 @@ function history_updateImagesAndLinks() {
         imageFormulas[i][0] = built.image
         linkFormulas[i][0] = built.link
         updatedCount++
-        Utilities.sleep(100) // Оптимизировано: было 1000мс, стало 100мс (как в Invest/Sales)
+        Utilities.sleep(LIMITS.HISTORY_UPDATE_DELAY_MS)
       } catch (e) {
         console.error('History: ошибка при подготовке формул', i + 2, e)
         errorCount++
@@ -679,23 +680,71 @@ function history_updateCurrentPriceMinMax_(sheet = null) {
     // Только если вообще нет цен - ставим null
     currentPrices[i][0] = currentPeriodPrice || lastFoundPrice
     
-    // Вычисляем Min и Max из всех цен
-    const prices = []
-    if (priceDataWidth > 0 && priceData[i]) {
-      for (let j = 0; j < priceData[i].length; j++) {
-        const value = priceData[i][j]
-        if (typeof value === 'number' && !isNaN(value) && value > 0) {
-          prices.push(value)
-        }
-      }
-    }
+    // ЛОГИКА Min/Max:
+    // Min/Max получаются из SteamWebAPI один раз при первоначальной настройке
+    // При обновлении цен проверяем: если новая цена выходит за границы Min/Max - обновляем
+    const currentMin = minPrices[i][0]
+    const currentMax = maxPrices[i][0]
+    const hasCurrentMin = currentMin !== null && currentMin !== '' && Number.isFinite(Number(currentMin)) && Number(currentMin) > 0
+    const hasCurrentMax = currentMax !== null && currentMax !== '' && Number.isFinite(Number(currentMax)) && Number(currentMax) > 0
     
-    if (prices.length > 0) {
-      minPrices[i][0] = Math.min(...prices)
-      maxPrices[i][0] = Math.max(...prices)
+    // Если есть новая цена за текущий период - проверяем, нужно ли обновить Min/Max
+    if (currentPeriodPrice && Number.isFinite(currentPeriodPrice) && currentPeriodPrice > 0) {
+      let newMin = hasCurrentMin ? Number(currentMin) : currentPeriodPrice
+      let newMax = hasCurrentMax ? Number(currentMax) : currentPeriodPrice
+      
+      // Если новая цена меньше текущего Min - обновляем Min
+      if (currentPeriodPrice < newMin) {
+        newMin = currentPeriodPrice
+      }
+      
+      // Если новая цена больше текущего Max - обновляем Max
+      if (currentPeriodPrice > newMax) {
+        newMax = currentPeriodPrice
+      }
+      
+      // Сохраняем обновленные значения
+      minPrices[i][0] = newMin
+      maxPrices[i][0] = newMax
+      
     } else {
-      minPrices[i][0] = null
-      maxPrices[i][0] = null
+      // Если нет новой цены за текущий период - сохраняем существующие значения Min/Max
+      // Это важно: не перезаписываем Min/Max из SteamWebAPI
+      // Fallback: если Min/Max не установлены, но есть цены в колонках - вычисляем из них
+      if (!hasCurrentMin || !hasCurrentMax) {
+        const prices = []
+        if (priceDataWidth > 0 && priceData[i]) {
+          for (let j = 0; j < priceData[i].length; j++) {
+            const value = priceData[i][j]
+            if (typeof value === 'number' && !isNaN(value) && value > 0) {
+              prices.push(value)
+            }
+          }
+        }
+        
+        if (prices.length > 0) {
+          // Устанавливаем Min/Max из колонок только если они еще не были установлены из SteamWebAPI
+          if (!hasCurrentMin) {
+            minPrices[i][0] = Math.min(...prices)
+          } else {
+            minPrices[i][0] = currentMin
+          }
+          
+          if (!hasCurrentMax) {
+            maxPrices[i][0] = Math.max(...prices)
+          } else {
+            maxPrices[i][0] = currentMax
+          }
+        } else {
+          // Нет цен - оставляем как есть (или null)
+          minPrices[i][0] = hasCurrentMin ? currentMin : null
+          maxPrices[i][0] = hasCurrentMax ? currentMax : null
+        }
+      } else {
+        // Min/Max уже установлены - сохраняем их без изменений
+        minPrices[i][0] = currentMin
+        maxPrices[i][0] = currentMax
+      }
     }
     
     updatedCount++
@@ -1613,20 +1662,30 @@ function history_updateInvestmentScores() {
     }
     // Задержка между batch запросами
     if (i + batchSize < itemNamesList.length) {
-      Utilities.sleep(500)
+      Utilities.sleep(LIMITS.METRICS_UPDATE_DELAY_MS)
     }
   }
   
-  // Обновляем Investment Score для каждой строки
+  // Подготовка данных для batch-операций
+  const investmentScores = []
+  
+  // Рассчитываем Investment Score для всех строк
   for (let i = 0; i < itemNames.length; i++) {
     const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) continue
+    if (!itemName) {
+      investmentScores.push([null])
+      continue
+    }
     
-    const row = DATA_START_ROW + i
     const mapping = mappings[itemName]
     const itemData = itemsData[itemName]
     
-    if (!itemData) continue
+    if (!itemData) {
+      investmentScores.push([null])
+      continue
+    }
+    
+    const row = DATA_START_ROW + i
     
     // Получаем историю цен для предмета
     const historyData = history_getPriceHistoryForItem_(sheet, row)
@@ -1655,9 +1714,13 @@ function history_updateInvestmentScores() {
       rankCategory
     )
     
-    // Обновляем колонку Investment Score
-    sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.INVESTMENT_SCORE))
-      .setValue(analytics_formatScore(investmentScore))
+    investmentScores.push([analytics_formatScore(investmentScore)])
+  }
+  
+  // Batch-запись Investment Scores
+  const count = investmentScores.length
+  if (count > 0) {
+    sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.INVESTMENT_SCORE), count, 1).setValues(investmentScores)
   }
 }
 
