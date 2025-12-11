@@ -21,13 +21,15 @@ function steamWebAPI_fetchItems(itemNames, game = 'dota2') {
   }
   
   // Формируем URL с параметрами
+  // Согласно документации API: параметр name - массив со стилем form, explode: true
+  // Формат: name=Item1&name=Item2 (без квадратных скобок, несколько раз)
   const baseUrl = `${API_CONFIG.STEAM_WEB_API.BASE_URL}/api/item`
   const params = []
   params.push(`game=${encodeURIComponent(game)}`)
   
-  // Добавляем все названия предметов
+  // Добавляем все названия предметов как отдельные параметры name=
   itemNames.forEach(name => {
-    params.push(`name[]=${encodeURIComponent(name)}`)
+    params.push(`name=${encodeURIComponent(name)}`)
   })
   
   const url = `${baseUrl}?${params.join('&')}`
@@ -250,6 +252,160 @@ function steamWebAPI_fetchItemsBatch(itemNames, game = 'dota2') {
     ok: errors.length === 0,
     items: result,
     errors: errors.length > 0 ? errors : undefined
+  }
+}
+
+/**
+ * Получает данные о предмете по NameID через SteamWebAPI.ru
+ * @param {number|string} nameId - NameID предмета (уникальный идентификатор)
+ * @returns {Object} {ok: boolean, item?: Object, error?: string}
+ */
+function steamWebAPI_fetchItemByNameId(nameId) {
+  if (!nameId) {
+    return { ok: false, error: 'empty_nameid' }
+  }
+  
+  const baseUrl = `${API_CONFIG.STEAM_WEB_API.BASE_URL}/api/item_by_nameid`
+  const url = `${baseUrl}?nameid=${encodeURIComponent(nameId)}`
+  
+  let attempts = 0
+  const maxRetries = API_CONFIG.STEAM_WEB_API.MAX_RETRIES
+  
+  while (attempts < maxRetries) {
+    try {
+      const options = {
+        method: 'GET',
+        muteHttpExceptions: true,
+        headers: {
+          'Accept': 'application/json'
+        }
+      }
+      
+      const response = UrlFetchApp.fetch(url, options)
+      const responseCode = response.getResponseCode()
+      const responseText = response.getContentText()
+      
+      if (responseCode === 429) {
+        const delay = API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS * Math.pow(2, attempts)
+        console.warn(`SteamWebAPI: лимит запросов (item_by_nameid), повтор через ${delay}ms (попытка ${attempts + 1}/${maxRetries})`)
+        Utilities.sleep(delay)
+        attempts++
+        continue
+      }
+      
+      if (responseCode !== 200) {
+        console.error(`SteamWebAPI: HTTP ошибка ${responseCode} (item_by_nameid): ${responseText.substring(0, 200)}`)
+        return { ok: false, error: `http_${responseCode}`, details: responseText.substring(0, 200) }
+      }
+      
+      const item = JSON.parse(responseText)
+      
+      if (!item || typeof item !== 'object') {
+        console.error('SteamWebAPI: неожиданный формат ответа (item_by_nameid, не объект)')
+        return { ok: false, error: 'invalid_format', details: 'Response is not an object' }
+      }
+      
+      return { ok: true, item: item }
+      
+    } catch (e) {
+      attempts++
+      if (attempts >= maxRetries) {
+        console.error('SteamWebAPI: исключение после всех попыток (item_by_nameid):', e)
+        return { ok: false, error: 'exception', details: e.message }
+      }
+      
+      const delay = API_CONFIG.STEAM_WEB_API.RETRY_DELAY_MS * Math.pow(2, attempts - 1)
+      console.warn(`SteamWebAPI: ошибка (item_by_nameid), повтор через ${delay}ms (попытка ${attempts}/${maxRetries}):`, e.message)
+      Utilities.sleep(delay)
+    }
+  }
+  
+  return { ok: false, error: 'max_retries_exceeded' }
+}
+
+/**
+ * Получает данные о предмете по названию через item_by_nameid endpoint
+ * API автоматически определяет NameID из базы данных по названию
+ * @param {string} itemName - Название предмета
+ * @returns {Object} {ok: boolean, item?: Object, error?: string}
+ */
+function steamWebAPI_fetchItemByNameIdViaName(itemName) {
+  if (!itemName || itemName.trim().length === 0) {
+    return { ok: false, error: 'empty_name' }
+  }
+  
+  // API позволяет искать по названию через параметр nameid
+  return steamWebAPI_fetchItemByNameId(itemName)
+}
+
+/**
+ * Тест подключения к SteamWebAPI.ru
+ * Показывает результат в UI
+ */
+function steamWebAPI_testConnection() {
+  const ui = SpreadsheetApp.getUi()
+  
+  try {
+    // Тестируем на примере предмета "Infernal Menace"
+    const testItemName = 'Infernal Menace'
+    
+    console.log('SteamWebAPI: начало теста подключения')
+    console.log(`SteamWebAPI: тестовый предмет: "${testItemName}"`)
+    
+    // Используем существующую функцию для корректного формирования запроса
+    const result = steamWebAPI_fetchSingleItem(testItemName, 'dota2')
+    
+    if (!result.ok) {
+      let errorMessage = `❌ Ошибка подключения\n\n`
+      
+      if (result.error === 'item_not_found') {
+        errorMessage += `Предмет "${testItemName}" не найден в базе SteamWebAPI.ru.\n\n`
+        errorMessage += `API работает, но тестовый предмет отсутствует.\n`
+        errorMessage += `Попробуйте другой предмет или проверьте правильность названия.`
+      } else if (result.error === 'empty_items') {
+        errorMessage += `Пустое название предмета.`
+      } else if (result.error && result.error.startsWith('http_')) {
+        errorMessage += `HTTP ошибка: ${result.error}\n\n`
+        errorMessage += `${result.details || 'Нет дополнительной информации'}`
+      } else {
+        errorMessage += `Ошибка: ${result.error || 'unknown'}\n\n`
+        errorMessage += `${result.details || 'Нет дополнительной информации'}`
+      }
+      
+      console.error('SteamWebAPI test:', errorMessage)
+      ui.alert('Тест SteamWebAPI.ru', errorMessage, ui.ButtonSet.OK)
+      return result
+    }
+    
+    if (!result.item) {
+      const errorMessage = `❌ Предмет не найден\n\n` +
+                          `Предмет "${testItemName}" не найден в базе SteamWebAPI.ru.`
+      console.warn('SteamWebAPI test: предмет не найден')
+      ui.alert('Тест SteamWebAPI.ru', errorMessage, ui.ButtonSet.OK)
+      return { ok: false, error: 'item_not_found' }
+    }
+    
+    // Парсим данные предмета
+    const parsed = steamWebAPI_parseItemData(result.item)
+    
+    const successMessage = `✅ Подключение успешно!\n\n` +
+                         `Тестовый предмет: "${testItemName}"\n\n` +
+                         `Получено данных:\n` +
+                         `• Название: ${parsed.name || 'N/A'}\n` +
+                         `• Цена: ${parsed.priceLatest ? parsed.priceLatest + ' ₽' : 'N/A'}\n` +
+                         `• Продано за 24ч: ${parsed.sold24h || 0}\n` +
+                         `• Герой (tag5): ${parsed.tag5 || 'N/A'}\n\n` +
+                         `SteamWebAPI.ru работает и готов к использованию!`
+    
+    console.log(`SteamWebAPI test: успешно, получены данные для "${testItemName}"`)
+    ui.alert('Тест SteamWebAPI.ru', successMessage, ui.ButtonSet.OK)
+    return { ok: true, message: successMessage, item: parsed }
+    
+  } catch (e) {
+    const errorMessage = `❌ Ошибка: ${e.message}\n\n${e.stack || ''}`
+    console.error('SteamWebAPI test: исключение', e)
+    ui.alert('Тест SteamWebAPI.ru', errorMessage, ui.ButtonSet.OK)
+    return { ok: false, error: 'exception', details: e.message }
   }
 }
 

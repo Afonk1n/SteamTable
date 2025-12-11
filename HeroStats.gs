@@ -388,25 +388,14 @@ function heroStats_getStats7DaysAgo(heroId, rankCategory) {
 
 /**
  * Обновляет статистику всех героев
- * Получает данные через Stratz API и сохраняет в лист
+ * Получает данные через OpenDota API и сохраняет в лист
  */
 function heroStats_updateAllStats() {
   console.log('HeroStats: начало обновления статистики')
   
-  const config = stratz_getConfig()
-  if (!config) {
-    console.error('HeroStats: Stratz API не настроен')
-    try {
-      logAutoAction_('HeroStats', 'Обновление статистики', 'Ошибка: Stratz API не настроен')
-    } catch (e) {
-      console.error('HeroStats: ошибка логирования:', e)
-    }
-    return
-  }
-  
   try {
-    // Получаем статистику для обеих категорий
-    const result = stratz_fetchAllHeroStats()
+    // Получаем статистику для обеих категорий через OpenDota API
+    const result = openDota_fetchAllHeroStats()
     
     if (!result.ok) {
       console.error('HeroStats: ошибка получения данных:', result.error)

@@ -90,12 +90,6 @@ const LIMITS = {
 
 // API конфигурация
 const API_CONFIG = {
-  STRATZ: {
-    BASE_URL: 'https://api.stratz.com/graphql',
-    TIMEOUT_MS: 30000,
-    MAX_RETRIES: 3,
-    RETRY_DELAY_MS: 1000
-  },
   STEAM_WEB_API: {
     BASE_URL: 'https://steamwebapi.ru',
     TIMEOUT_MS: 30000,
@@ -106,6 +100,12 @@ const API_CONFIG = {
   STEAM_PRICE_HISTORY: {
     BASE_URL: 'https://steamcommunity.com/market/pricehistory',
     TIMEOUT_MS: 10000 // 10 секунд таймаут для pricehistory
+  },
+  OPENDOTA: {
+    BASE_URL: 'https://api.opendota.com/api',
+    TIMEOUT_MS: 30000,
+    MAX_RETRIES: 3,
+    RETRY_DELAY_MS: 500
   }
 }
 
