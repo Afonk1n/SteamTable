@@ -357,6 +357,30 @@ History (сохранение цен по датам)
 - `insertLogRowUniversal_(sheet, values, formats)` - Универсальная функция для вставки строк в листы логов
 - `createLogSheet_(sheetName, headers, columnWidths)` - Универсальная функция для создания листов логов (в SheetService.gs)
 
+### SteamWebAPI
+
+- `steamWebAPI_fetchItems(itemNames, game)` - Получение данных о предметах пакетами (до 50)
+- `steamWebAPI_fetchSingleItem(itemName, game)` - Получение данных об одном предмете
+- `steamWebAPI_getItemData(itemName, game)` - Унифицированный интерфейс для получения данных о предмете
+  - **Автоматический fallback:** Если предмет не найден через основной endpoint `/api/item`, автоматически пробует `/api/item_by_nameid` с поиском по Market Hash Name
+  - API автоматически определяет NameID из базы данных по названию
+  - Используется в `fetchLowestPrice_()` для получения цен
+- `steamWebAPI_getHeroNameFromTags(itemData)` - Извлечение имени героя из тегов предмета (tag5)
+- `steamWebAPI_parseItemData(itemData)` - Парсинг данных предмета в удобный формат
+- `steamWebAPI_fetchItemsBatch(itemNames, game)` - Получение данных для нескольких предметов пакетами
+- `steamWebAPI_fetchItemByNameId(nameId)` - Получение данных по NameID
+- `steamWebAPI_fetchItemByNameIdViaName(itemName, game)` - Получение данных по названию через item_by_nameid (fallback)
+  - Использует параметр `name` для поиска по Market Hash Name
+  - API автоматически определяет NameID из базы данных
+  - Используется как fallback в `PriceHistoryUtils` и `HeroMapping`
+- `steamWebAPI_testConnection()` - Тест подключения к API
+
+### OpenDotaAPI
+
+- `openDota_fetchHeroStats(rankTier)` - Получение статистики героев (пикрейт, винрейт, банрейт)
+- `openDota_fetchAllHeroStats()` - Получение статистики для обеих категорий (High Rank + All Ranks)
+- `openDota_testConnection()` - Тест подключения к API
+
 ### Telegram
 
 - `telegram_setConfig(botToken, chatId)` - Сохранение конфигурации бота (в PropertiesService)
@@ -571,6 +595,8 @@ avgProfitability = средняя прибыльность всех позици
 - [ ] Новые записи вставляются сверху (используется `insertRowAfter(HEADER_ROW)`)
 - [ ] API запросы используют retry логику и обработку ошибок (429, таймауты)
 - [ ] Fallback механизмы работают (например, item_by_nameid для предметов, не найденных через основной endpoint)
+  - `steamWebAPI_getItemData()` автоматически использует fallback на `/api/item_by_nameid` с поиском по Market Hash Name
+  - `PriceHistoryUtils` и `HeroMapping` также используют fallback для не найденных предметов
 - [ ] Batch операции для API запросов (SteamWebAPI.ru поддерживает до 50 предметов за раз)
 
 ---

@@ -340,7 +340,8 @@ function priceHistory_calculateMinMaxForAllItems(onlyMissing = false) {
     
     try {
       // Получаем данные для пакета предметов через SteamWebAPI.ru
-      const batchResult = steamWebAPI_fetchItems(batch, 'dota2')
+      // Используем fetchItemsBatch с fallback для автоматической обработки не найденных предметов
+      const batchResult = steamWebAPI_fetchItemsBatch(batch, 'dota2', true)
       
       if (!batchResult.ok || !batchResult.items) {
         errorCount += batch.length
@@ -349,9 +350,14 @@ function priceHistory_calculateMinMaxForAllItems(onlyMissing = false) {
         continue
       }
       
+      // batchResult.items может быть пустым объектом, если все предметы не найдены
+      // Это нормально, fallback уже попытался их найти
+      
       // Создаем карту результатов с несколькими ключами для гибкого поиска
+      // batchResult.items - это объект {key: item}, нужно преобразовать в массив
       const itemsMap = {}
-      batchResult.items.forEach(item => {
+      const itemsArray = Object.values(batchResult.items || {})
+      itemsArray.forEach(item => {
         // Добавляем предмет по нескольким ключам для гибкого поиска
         const keys = [
           (item.normalizedname || '').toLowerCase().trim(),
@@ -407,17 +413,21 @@ function priceHistory_calculateMinMaxForAllItems(onlyMissing = false) {
             }
           }
           
-          // Если не нашли через основной endpoint, пробуем через item_by_nameid (fallback)
-          if (!itemData) {
-            console.log(`PriceHistory: предмет "${itemName}" не найден через основной endpoint, пробуем item_by_nameid`)
-            try {
-              const fallbackResult = steamWebAPI_fetchItemByNameIdViaName(itemName, 'dota2')
-              if (fallbackResult.ok && fallbackResult.item) {
-                itemData = fallbackResult.item
-                console.log(`PriceHistory: предмет "${itemName}" найден через item_by_nameid`)
+          // Fallback уже выполнен в steamWebAPI_fetchItemsBatch, проверяем результат еще раз
+          // Пробуем найти в batchResult.items напрямую (fallback мог добавить предмет)
+          if (!itemData && batchResult.items) {
+            const searchKeys = [
+              itemName.toLowerCase().trim(),
+              itemName.toLowerCase().trim().replace(/[''""`]/g, ''),
+              itemName.toLowerCase().trim().replace(/[''""`]/g, '').replace(/\s+/g, ' ')
+            ]
+            
+            for (const key of searchKeys) {
+              if (batchResult.items[key]) {
+                itemData = batchResult.items[key]
+                console.log(`PriceHistory: предмет "${itemName}" найден через fallback в batchResult`)
+                break
               }
-            } catch (e) {
-              console.warn(`PriceHistory: ошибка при fallback запросе для "${itemName}":`, e.message)
             }
           }
           

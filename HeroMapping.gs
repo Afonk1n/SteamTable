@@ -439,15 +439,15 @@ function heroMapping_autoDetectFromSteamWebAPI() {
     return
   }
   
-  // Получаем данные через SteamWebAPI.ru пакетами
-  const batchResult = steamWebAPI_fetchItemsBatch(uniqueItemNames, 'dota2')
+  // Получаем данные через SteamWebAPI.ru пакетами (с автоматическим fallback)
+  const batchResult = steamWebAPI_fetchItemsBatch(uniqueItemNames, 'dota2', true)
   
-  // Обрабатываем результаты и пробуем fallback для не найденных
+  // Обрабатываем результаты (fallback уже выполнен в steamWebAPI_fetchItemsBatch)
   const updates = []
   const notFoundItems = []
   
   uniqueItemNames.forEach(itemName => {
-    // Пробуем найти в основном результате
+    // Пробуем найти в результате (включая результаты fallback)
     let itemData = null
     const searchKeys = [
       itemName.toLowerCase().trim(),
@@ -455,17 +455,53 @@ function heroMapping_autoDetectFromSteamWebAPI() {
       itemName.toLowerCase().trim().replace(/[''""`]/g, '').replace(/\s+/g, ' ')
     ]
     
-    for (const key of searchKeys) {
-      if (batchResult.items && batchResult.items[key]) {
-        itemData = batchResult.items[key]
-        break
+    // Ищем в batchResult.items (объект с ключами из normalizedname/marketname/markethashname)
+    if (batchResult.items) {
+      for (const key of searchKeys) {
+        if (batchResult.items[key]) {
+          itemData = batchResult.items[key]
+          break
+        }
+      }
+      
+      // Если не нашли по ключам, ищем по markethashname в значениях
+      if (!itemData) {
+        for (const itemKey in batchResult.items) {
+          const item = batchResult.items[itemKey]
+          const itemNames = [
+            item.markethashname,
+            item.marketname,
+            item.normalizedname
+          ].filter(n => n && n.trim().length > 0)
+          
+          for (const itemNameFromAPI of itemNames) {
+            const normalizedItemName = itemNameFromAPI.toLowerCase().trim()
+            const normalizedSearchName = itemName.toLowerCase().trim()
+            
+            if (normalizedItemName === normalizedSearchName ||
+                normalizedItemName.replace(/[''""`]/g, '') === normalizedSearchName.replace(/[''""`]/g, '') ||
+                normalizedItemName.replace(/[''""`]/g, '').replace(/\s+/g, ' ') === normalizedSearchName.replace(/[''""`]/g, '').replace(/\s+/g, ' ')) {
+              itemData = item
+              break
+            }
+          }
+          
+          if (itemData) break
+        }
       }
     }
     
-    // Если не нашли, пробуем fallback на item_by_nameid
+    // Если не нашли, добавляем в список не найденных
     if (!itemData) {
       notFoundItems.push(itemName)
-      return // Будем обрабатывать отдельно
+      // Добавляем без героя, чтобы предмет был в HeroMapping
+      updates.push({
+        itemName: itemName,
+        heroName: null,
+        autoDetected: false,
+        imageUrl: ''
+      })
+      return
     }
     
     // Парсим данные
@@ -481,37 +517,9 @@ function heroMapping_autoDetectFromSteamWebAPI() {
     })
   })
   
-  // Обрабатываем не найденные предметы через fallback (item_by_nameid)
-  console.log(`HeroMapping: ${notFoundItems.length} предметов не найдено через основной endpoint, пробуем fallback`)
-  for (const itemName of notFoundItems) {
-    try {
-      const fallbackResult = steamWebAPI_fetchItemByNameIdViaName(itemName, 'dota2')
-      if (fallbackResult.ok && fallbackResult.item) {
-        const parsedData = steamWebAPI_parseItemData(fallbackResult.item)
-        const heroName = steamWebAPI_getHeroNameFromTags(parsedData)
-        const imageUrl = parsedData.imageUrl || ''
-        
-        updates.push({
-          itemName: itemName,
-          heroName: heroName || null,
-          autoDetected: !!heroName,
-          imageUrl: imageUrl
-        })
-        console.log(`HeroMapping: предмет "${itemName}" найден через fallback`)
-      }
-    } catch (e) {
-      console.warn(`HeroMapping: ошибка fallback для "${itemName}":`, e.message)
-      // Добавляем без героя
-      updates.push({
-        itemName: itemName,
-        heroName: null,
-        autoDetected: false,
-        imageUrl: ''
-      })
-    }
-    
-    // Небольшая задержка между fallback запросами
-    Utilities.sleep(LIMITS.BASE_DELAY_MS)
+  // Логируем не найденные предметы (fallback уже был выполнен в steamWebAPI_fetchItemsBatch)
+  if (notFoundItems.length > 0) {
+    console.log(`HeroMapping: ${notFoundItems.length} предметов не найдено даже после fallback: ${notFoundItems.slice(0, 5).join(', ')}${notFoundItems.length > 5 ? '...' : ''}`)
   }
   
   // Batch обновление всех предметов

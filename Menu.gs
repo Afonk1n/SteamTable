@@ -159,11 +159,12 @@ function performInitialSetup() {
   const startResponse = ui.alert(
     'Первоначальная настройка',
     'Эта функция выполнит все необходимые операции для настройки новой таблицы:\n\n' +
-    '1. Инициализация всех таблиц\n' +
-    '2. Заполнение Min/Max цен\n' +
-    '3. Синхронизация HeroMapping с History\n' +
-    '4. Автоопределение героев\n' +
-    '5. Первое обновление статистики героев\n\n' +
+    '1. Заполнение Min/Max цен\n' +
+    '2. Синхронизация HeroMapping с History\n' +
+    '3. Автоопределение героев\n' +
+    '4. Первое обновление статистики героев\n\n' +
+    '⚠️ ВАЖНО: Перед запуском убедитесь, что таблицы инициализированы!\n' +
+    '(SteamTable → Инициализировать все таблицы)\n\n' +
     'Это может занять несколько минут. Продолжить?',
     ui.ButtonSet.YES_NO
   )
@@ -173,7 +174,6 @@ function performInitialSetup() {
   }
   
   const results = {
-    initialized: false,
     minMaxCalculated: false,
     heroMappingSynced: false,
     heroesDetected: false,
@@ -181,15 +181,9 @@ function performInitialSetup() {
   }
   
   try {
-    // ШАГ 1: Инициализация всех таблиц
-    ui.alert('Шаг 1/5: Инициализация таблиц...')
-    initializeAllTables()
-    results.initialized = true
-    console.log('InitialSetup: таблицы инициализированы')
-    
-    // ШАГ 2: Заполнение Min/Max цен (с выбором режима)
+    // ШАГ 1: Заполнение Min/Max цен (с выбором режима)
     const minMaxResponse = ui.alert(
-      'Шаг 2/5: Заполнение Min/Max цен',
+      'Шаг 1/4: Заполнение Min/Max цен',
       'Как заполнить Min/Max?\n\n' +
       'ДА - для всех предметов (может занять много времени)\n' +
       'НЕТ - только у отсутствующих (рекомендуется)\n' +
@@ -211,9 +205,9 @@ function performInitialSetup() {
       console.log('InitialSetup: пропущен расчет Min/Max')
     }
     
-    // ШАГ 3: Синхронизация HeroMapping с History
+    // ШАГ 2: Синхронизация HeroMapping с History
     const syncResponse = ui.alert(
-      'Шаг 3/5: Синхронизация HeroMapping',
+      'Шаг 2/4: Синхронизация HeroMapping',
       'Синхронизировать предметы из History в HeroMapping?',
       ui.ButtonSet.YES_NO
     )
@@ -227,9 +221,9 @@ function performInitialSetup() {
       console.log('InitialSetup: пропущена синхронизация HeroMapping')
     }
     
-    // ШАГ 4: Автоопределение героев
+    // ШАГ 3: Автоопределение героев
     const detectResponse = ui.alert(
-      'Шаг 4/5: Автоопределение героев',
+      'Шаг 3/4: Автоопределение героев',
       'Автоматически определить героев для предметов? (может занять несколько минут)',
       ui.ButtonSet.YES_NO
     )
@@ -243,9 +237,9 @@ function performInitialSetup() {
       console.log('InitialSetup: пропущено автоопределение героев')
     }
     
-    // ШАГ 5: Первое обновление статистики героев
+    // ШАГ 4: Первое обновление статистики героев
     const statsResponse = ui.alert(
-      'Шаг 5/5: Обновление статистики героев',
+      'Шаг 4/4: Обновление статистики героев',
       'Обновить статистику героев через OpenDota API? (может занять несколько минут)',
       ui.ButtonSet.YES_NO
     )
@@ -265,14 +259,12 @@ function performInitialSetup() {
     
     let summary = `✅ Первоначальная настройка завершена!\n\nВыполнено шагов: ${completed}/${total}\n\n`
     
-    if (results.initialized) summary += '✅ Инициализация таблиц\n'
     if (results.minMaxCalculated) summary += '✅ Расчет Min/Max цен\n'
     if (results.heroMappingSynced) summary += '✅ Синхронизация HeroMapping\n'
     if (results.heroesDetected) summary += '✅ Автоопределение героев\n'
     if (results.statsUpdated) summary += '✅ Обновление статистики героев\n'
     
     summary += '\nСледующие шаги:\n'
-    summary += '• Добавьте предметы в лист History (колонка B - Название)\n'
     summary += '• Включите автообновление: SteamTable → Включить автообновление'
     
     logAutoAction_('InitialSetup', 'Первоначальная настройка', `Завершено: ${completed}/${total} шагов`)

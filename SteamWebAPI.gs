@@ -51,14 +51,27 @@ function steamWebAPI_fetchItems(itemNames, game = 'dota2') {
   
   try {
     const responseText = result.response.getContentText()
-    const items = JSON.parse(responseText)
+    const data = JSON.parse(responseText)
     
-    if (!Array.isArray(items)) {
+    // API может вернуть объект с ошибкой вместо массива
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      if (data.error) {
+        // Если это ошибка "Not found" или пустой ответ, возвращаем пустой массив
+        // Это не критическая ошибка - просто предметы не найдены
+        console.log(`SteamWebAPI: API вернул ошибку "${data.error}", возвращаем пустой массив`)
+        return { ok: true, items: [] }
+      }
+      // Если это другой объект (не массив и не ошибка), это неожиданный формат
+      console.error('SteamWebAPI: неожиданный формат ответа (объект, не массив и не ошибка)')
+      return { ok: false, error: 'invalid_format', details: 'Response is not an array' }
+    }
+    
+    if (!Array.isArray(data)) {
       console.error('SteamWebAPI: неожиданный формат ответа (не массив)')
       return { ok: false, error: 'invalid_format', details: 'Response is not an array' }
     }
     
-    return { ok: true, items: items }
+    return { ok: true, items: data }
   } catch (e) {
     console.error('SteamWebAPI: ошибка парсинга ответа:', e)
     return { ok: false, error: 'parse_error', details: e.message }
@@ -88,26 +101,48 @@ function steamWebAPI_fetchSingleItem(itemName, game = 'dota2') {
 /**
  * Унифицированный интерфейс для получения данных о предмете
  * Возвращает данные в формате совместимом с текущим кодом
- * @param {string} itemName - Название предмета
+ * Использует fallback на item_by_nameid если предмет не найден через основной endpoint
+ * @param {string} itemName - Название предмета (Market Hash Name)
  * @param {string} game - Игра ('dota2', 'cs2', 'rust', 'tf2')
  * @returns {Object} {ok: boolean, price?: number, data?: Object, error?: string}
  */
 function steamWebAPI_getItemData(itemName, game = 'dota2') {
+  // Пробуем сначала основной endpoint
   const result = steamWebAPI_fetchSingleItem(itemName, game)
   
-  if (!result.ok || !result.item) {
-    return result
+  if (result.ok && result.item) {
+    const item = result.item
+    const price = item.pricelatest || item.price || null
+    
+    return {
+      ok: true,
+      price: price,
+      data: item
+    }
   }
   
-  const item = result.item
+  // Если не нашли через основной endpoint, пробуем fallback на item_by_nameid
+  // API автоматически определяет NameID из Market Hash Name
+  console.log(`SteamWebAPI: предмет "${itemName}" не найден через основной endpoint, пробуем item_by_nameid`)
+  const fallbackResult = steamWebAPI_fetchItemByNameIdViaName(itemName, game)
   
-  // Извлекаем основную цену (pricelatest)
-  const price = item.pricelatest || item.price || null
+  if (fallbackResult.ok && fallbackResult.item) {
+    const item = fallbackResult.item
+    const price = item.pricelatest || item.price || null
+    
+    console.log(`SteamWebAPI: предмет "${itemName}" найден через item_by_nameid`)
+    return {
+      ok: true,
+      price: price,
+      data: item
+    }
+  }
   
+  // Если и fallback не помог, возвращаем ошибку
   return {
-    ok: true,
-    price: price,
-    data: item
+    ok: false,
+    error: fallbackResult.error || result.error || 'item_not_found',
+    details: fallbackResult.details || result.details
   }
 }
 
@@ -187,11 +222,13 @@ function steamWebAPI_parseItemData(itemData) {
 
 /**
  * Получает данные для нескольких предметов пакетами (batch)
+ * Автоматически использует fallback на item_by_nameid для не найденных предметов
  * @param {Array<string>} itemNames - Массив названий предметов
  * @param {string} game - Игра ('dota2', 'cs2', 'rust', 'tf2')
- * @returns {Object} {ok: boolean, items?: Object, errors?: Array}
+ * @param {boolean} useFallback - Использовать fallback для не найденных предметов (по умолчанию true)
+ * @returns {Object} {ok: boolean, items?: Object, notFound?: Array, errors?: Array}
  */
-function steamWebAPI_fetchItemsBatch(itemNames, game = 'dota2') {
+function steamWebAPI_fetchItemsBatch(itemNames, game = 'dota2', useFallback = true) {
   if (!itemNames || itemNames.length === 0) {
     return { ok: false, error: 'empty_items' }
   }
@@ -199,6 +236,7 @@ function steamWebAPI_fetchItemsBatch(itemNames, game = 'dota2') {
   const maxItemsPerRequest = API_CONFIG.STEAM_WEB_API.MAX_ITEMS_PER_REQUEST
   const result = {}
   const errors = []
+  const notFoundItems = []
   
   // Разбиваем на пакеты по 50 предметов
   for (let i = 0; i < itemNames.length; i += maxItemsPerRequest) {
@@ -208,13 +246,66 @@ function steamWebAPI_fetchItemsBatch(itemNames, game = 'dota2') {
     
     if (batchResult.ok && batchResult.items) {
       // Добавляем все предметы в результат (по normalizedName или marketname как ключ)
+      const foundNames = new Set()
       batchResult.items.forEach(item => {
         const key = item.normalizedname || item.marketname || item.markethashname
         if (key) {
           result[key.toLowerCase()] = item
+          // Отмечаем найденные предметы
+          foundNames.add(key.toLowerCase())
+        }
+      })
+      
+      // Определяем, какие предметы из batch не были найдены
+      // Создаем множество всех найденных названий из ответа API для более точного поиска
+      const foundItemNames = new Set()
+      batchResult.items.forEach(item => {
+        const names = [
+          item.normalizedname,
+          item.marketname,
+          item.markethashname
+        ].filter(n => n && n.trim().length > 0)
+        
+        names.forEach(name => {
+          foundItemNames.add(name.toLowerCase().trim())
+          foundItemNames.add(name.toLowerCase().trim().replace(/[''""`]/g, ''))
+          foundItemNames.add(name.toLowerCase().trim().replace(/[''""`]/g, '').replace(/\s+/g, ' '))
+        })
+      })
+      
+      batch.forEach(itemName => {
+        const searchKeys = [
+          itemName.toLowerCase().trim(),
+          itemName.toLowerCase().trim().replace(/[''""`]/g, ''),
+          itemName.toLowerCase().trim().replace(/[''""`]/g, '').replace(/\s+/g, ' ')
+        ]
+        
+        let found = false
+        // Проверяем, есть ли предмет в найденных названиях
+        for (const key of searchKeys) {
+          if (foundItemNames.has(key)) {
+            found = true
+            break
+          }
+        }
+        
+        // Также проверяем в result по ключам (на случай если уже добавлен)
+        if (!found) {
+          for (const key of searchKeys) {
+            if (result[key]) {
+              found = true
+              break
+            }
+          }
+        }
+        
+        if (!found) {
+          notFoundItems.push(itemName)
         }
       })
     } else {
+      // Если весь batch не обработался, добавляем все предметы в notFound
+      batch.forEach(itemName => notFoundItems.push(itemName))
       errors.push({
         batch: batch,
         error: batchResult.error || 'unknown'
@@ -227,9 +318,34 @@ function steamWebAPI_fetchItemsBatch(itemNames, game = 'dota2') {
     }
   }
   
+  // Если включен fallback, пробуем найти не найденные предметы через item_by_nameid
+  if (useFallback && notFoundItems.length > 0) {
+    console.log(`SteamWebAPI: ${notFoundItems.length} предметов не найдено через основной endpoint, пробуем fallback`)
+    
+    for (const itemName of notFoundItems) {
+      try {
+        const fallbackResult = steamWebAPI_fetchItemByNameIdViaName(itemName, game)
+        if (fallbackResult.ok && fallbackResult.item) {
+          const item = fallbackResult.item
+          const key = item.normalizedname || item.marketname || item.markethashname
+          if (key) {
+            result[key.toLowerCase()] = item
+            console.log(`SteamWebAPI: предмет "${itemName}" найден через fallback`)
+          }
+        }
+      } catch (e) {
+        console.warn(`SteamWebAPI: ошибка fallback для "${itemName}":`, e.message)
+      }
+      
+      // Небольшая задержка между fallback запросами
+      Utilities.sleep(LIMITS.BASE_DELAY_MS)
+    }
+  }
+  
   return {
     ok: errors.length === 0,
     items: result,
+    notFound: notFoundItems.length > 0 ? notFoundItems : undefined,
     errors: errors.length > 0 ? errors : undefined
   }
 }
