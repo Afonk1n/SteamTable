@@ -103,6 +103,47 @@ function openDota_fetchHeroStats(rankTier = null) {
       }
     })
     
+    // Рассчитываем общие суммы для расчета процентов
+    let totalHighRankPicks = 0
+    let totalHighRankContests = 0
+    let totalAllRanksPicks = 0
+    let totalAllRanksContests = 0
+    
+    heroStats.forEach(hero => {
+      if (hero.highRank) {
+        totalHighRankPicks += hero.highRank.pickRate || 0
+        totalHighRankContests += hero.highRank.contestRate || 0
+      }
+      if (hero.allRanks) {
+        totalAllRanksPicks += hero.allRanks.pickRate || 0
+        totalAllRanksContests += hero.allRanks.contestRate || 0
+      }
+    })
+    
+    // Рассчитываем проценты для каждого героя
+    heroStats.forEach(hero => {
+      if (hero.highRank) {
+        // Pick Rate в процентах
+        hero.highRank.pickRatePercent = totalHighRankPicks > 0 
+          ? (hero.highRank.pickRate / totalHighRankPicks) * 100 
+          : 0
+        // Contest Rate в процентах
+        hero.highRank.contestRatePercent = totalHighRankContests > 0
+          ? (hero.highRank.contestRate / totalHighRankContests) * 100
+          : 0
+      }
+      if (hero.allRanks) {
+        // Pick Rate в процентах
+        hero.allRanks.pickRatePercent = totalAllRanksPicks > 0
+          ? (hero.allRanks.pickRate / totalAllRanksPicks) * 100
+          : 0
+        // Contest Rate в процентах
+        hero.allRanks.contestRatePercent = totalAllRanksContests > 0
+          ? (hero.allRanks.contestRate / totalAllRanksContests) * 100
+          : 0
+      }
+    })
+    
     return { ok: true, heroStats: heroStats }
   } catch (e) {
     console.error('OpenDota: ошибка парсинга ответа:', e)
@@ -127,37 +168,41 @@ function openDota_fetchAllHeroStats() {
   const allRanks = []
   
   result.heroStats.forEach(hero => {
-    if (hero.highRank) {
-      highRank.push({
-        heroId: hero.heroId,
-        heroName: hero.heroName,
-        pickRate: hero.highRank.pickRate,
-        winRate: hero.highRank.winRate,
-        banRate: hero.highRank.banRate,
-        contestRate: hero.highRank.contestRate,
-        matchCount: hero.highRank.matchCount,
-        // Про-статистика
-        proPick: hero.highRank.proPick || 0,
-        proBan: hero.highRank.proBan || 0,
-        proContestRate: hero.highRank.proContestRate || 0
-      })
-    }
-    
-    if (hero.allRanks) {
-      allRanks.push({
-        heroId: hero.heroId,
-        heroName: hero.heroName,
-        pickRate: hero.allRanks.pickRate,
-        winRate: hero.allRanks.winRate,
-        banRate: hero.allRanks.banRate,
-        contestRate: hero.allRanks.contestRate,
-        matchCount: hero.allRanks.matchCount,
-        // Про-статистика
-        proPick: hero.allRanks.proPick || 0,
-        proBan: hero.allRanks.proBan || 0,
-        proContestRate: hero.allRanks.proContestRate || 0
-      })
-    }
+      if (hero.highRank) {
+        highRank.push({
+          heroId: hero.heroId,
+          heroName: hero.heroName,
+          pickRate: hero.highRank.pickRate,
+          pickRatePercent: hero.highRank.pickRatePercent || 0, // Процент пиков
+          winRate: hero.highRank.winRate,
+          banRate: hero.highRank.banRate,
+          contestRate: hero.highRank.contestRate,
+          contestRatePercent: hero.highRank.contestRatePercent || 0, // Процент контестов
+          matchCount: hero.highRank.matchCount,
+          // Про-статистика
+          proPick: hero.highRank.proPick || 0,
+          proBan: hero.highRank.proBan || 0,
+          proContestRate: hero.highRank.proContestRate || 0
+        })
+      }
+      
+      if (hero.allRanks) {
+        allRanks.push({
+          heroId: hero.heroId,
+          heroName: hero.heroName,
+          pickRate: hero.allRanks.pickRate,
+          pickRatePercent: hero.allRanks.pickRatePercent || 0, // Процент пиков
+          winRate: hero.allRanks.winRate,
+          banRate: hero.allRanks.banRate,
+          contestRate: hero.allRanks.contestRate,
+          contestRatePercent: hero.allRanks.contestRatePercent || 0, // Процент контестов
+          matchCount: hero.allRanks.matchCount,
+          // Про-статистика
+          proPick: hero.allRanks.proPick || 0,
+          proBan: hero.allRanks.proBan || 0,
+          proContestRate: hero.allRanks.proContestRate || 0
+        })
+      }
   })
   
   return {

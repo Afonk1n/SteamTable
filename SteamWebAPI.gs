@@ -435,12 +435,23 @@ function steamWebAPI_fetchItemByNameIdViaName(itemName, game = 'dota2') {
     const responseText = result.response.getContentText()
     const data = JSON.parse(responseText)
     
-    // API возвращает массив, берем первый элемент
-    if (Array.isArray(data) && data.length > 0) {
-      return { ok: true, item: data[0] }
+    // API может возвращать как массив, так и объект напрямую
+    if (Array.isArray(data)) {
+      // Если массив, берем первый элемент
+      if (data.length > 0) {
+        return { ok: true, item: data[0] }
+      }
+      return { ok: false, error: 'no_data', details: 'Empty response array' }
+    } else if (data && typeof data === 'object') {
+      // Если объект напрямую, проверяем на наличие ошибки
+      if (data.error) {
+        return { ok: false, error: data.error, details: 'API returned error' }
+      }
+      // Если объект с данными, возвращаем его
+      return { ok: true, item: data }
     }
     
-    return { ok: false, error: 'no_data', details: 'Empty response array' }
+    return { ok: false, error: 'invalid_format', details: 'Response is neither array nor object' }
   } catch (e) {
     console.error('SteamWebAPI: ошибка парсинга ответа (item_by_nameid via name):', e)
     return { ok: false, error: 'parse_error', details: e.message }

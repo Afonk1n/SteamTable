@@ -513,6 +513,14 @@ function unified_priceUpdate() {
         logAutoAction_('Unified', 'Ошибка обновления трендов', 'ERROR')
       }
       
+      // Проверяем резкие изменения цены (критические уведомления)
+      try {
+        telegram_checkPriceChanges_()
+      } catch (e) {
+        console.error('Unified: ошибка при проверке резких изменений цены:', e)
+        // Не прерываем выполнение, просто логируем ошибку
+      }
+      
       // Сохраняем историю портфеля и обновляем Investment Scores (только после дневного сбора)
       // Примечание: аналитика Invest/Sales уже обновлена в syncPricesFromHistoryToInvestAndSales()
       try {

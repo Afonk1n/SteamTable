@@ -387,14 +387,16 @@ function analytics_normalizeToRange(value, min, max, targetMin = 0, targetMax = 
 }
 
 /**
- * Форматирование скора для отображения (🟩 0.93)
+ * Форматирование скора для отображения (🟢 0.93)
+ * Использует круглые эмодзи для единообразия
  * @param {number} score - Score от 0 до 1
  * @returns {string} Отформатированная строка
  */
 function analytics_formatScore(score) {
   if (typeof score !== 'number' || isNaN(score)) return '—'
   
-  const emoji = score >= 0.75 ? '🟩' : score >= 0.60 ? '🟨' : score >= 0.40 ? '⚪' : '🟥'
+  // Круглые эмодзи: 🟢 (>=0.75), 🟡 (>=0.60), ⚪ (>=0.40), 🔴 (<0.40)
+  const emoji = score >= 0.75 ? '🟢' : score >= 0.60 ? '🟡' : score >= 0.40 ? '⚪' : '🔴'
   return `${emoji} ${score.toFixed(2)}`
 }
 

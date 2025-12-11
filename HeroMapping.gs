@@ -616,3 +616,107 @@ function heroMapping_syncWithHistory() {
   }
 }
 
+/**
+ * Заполняет пустые Hero ID в HeroMapping, используя данные из HeroStats
+ * Ищет Hero ID по Hero Name в HeroStats и заполняет в HeroMapping
+ * @returns {Object} {filled: number, notFound: number} - количество заполненных и не найденных
+ */
+function heroMapping_fillMissingHeroIds() {
+  const mappingSheet = getHeroMappingSheet_()
+  if (!mappingSheet) {
+    console.warn('HeroMapping: лист HeroMapping не найден')
+    return {filled: 0, notFound: 0}
+  }
+  
+  const statsSheet = getHeroStatsSheet_()
+  if (!statsSheet) {
+    console.warn('HeroMapping: лист HeroStats не найден, пропускаем заполнение Hero ID')
+    return {filled: 0, notFound: 0}
+  }
+  
+  const mappingLastRow = mappingSheet.getLastRow()
+  if (mappingLastRow < DATA_START_ROW) {
+    console.log('HeroMapping: нет предметов в HeroMapping')
+    return {filled: 0, notFound: 0}
+  }
+  
+  const statsLastRow = statsSheet.getLastRow()
+  if (statsLastRow < DATA_START_ROW) {
+    console.log('HeroMapping: нет данных в HeroStats, пропускаем заполнение Hero ID')
+    return {filled: 0, notFound: 0}
+  }
+  
+  // Создаем Map: heroName → heroId из HeroStats
+  const heroNameToIdMap = new Map()
+  const statsHeroIds = statsSheet.getRange(DATA_START_ROW, getColumnIndex(HERO_STATS_COLUMNS.HERO_ID), statsLastRow - HEADER_ROW, 1).getValues()
+  const statsHeroNames = statsSheet.getRange(DATA_START_ROW, getColumnIndex(HERO_STATS_COLUMNS.HERO_NAME), statsLastRow - HEADER_ROW, 1).getValues()
+  
+  for (let i = 0; i < statsHeroIds.length; i++) {
+    const heroId = Number(statsHeroIds[i][0])
+    const heroName = String(statsHeroNames[i][0] || '').trim()
+    
+    if (heroId && heroName && !heroNameToIdMap.has(heroName)) {
+      // Берем первый найденный Hero ID (одинаковый для High Rank и All Ranks)
+      heroNameToIdMap.set(heroName, heroId)
+    }
+  }
+  
+  console.log(`HeroMapping: создан справочник Hero Name → Hero ID (${heroNameToIdMap.size} героев)`)
+  
+  // Находим строки в HeroMapping с пустым Hero ID, но с заполненным Hero Name
+  const mappingItemNames = mappingSheet.getRange(DATA_START_ROW, getColumnIndex(HERO_MAPPING_COLUMNS.ITEM_NAME), mappingLastRow - HEADER_ROW, 1).getValues()
+  const mappingHeroNames = mappingSheet.getRange(DATA_START_ROW, getColumnIndex(HERO_MAPPING_COLUMNS.HERO_NAME), mappingLastRow - HEADER_ROW, 1).getValues()
+  const mappingHeroIds = mappingSheet.getRange(DATA_START_ROW, getColumnIndex(HERO_MAPPING_COLUMNS.HERO_ID), mappingLastRow - HEADER_ROW, 1).getValues()
+  
+  const heroIdUpdates = []
+  let filledCount = 0
+  let notFoundCount = 0
+  
+  for (let i = 0; i < mappingItemNames.length; i++) {
+    const heroName = String(mappingHeroNames[i][0] || '').trim()
+    const currentHeroId = mappingHeroIds[i][0]
+    
+    // Пропускаем, если Hero ID уже заполнен
+    if (currentHeroId && Number.isFinite(Number(currentHeroId)) && Number(currentHeroId) > 0) {
+      continue
+    }
+    
+    // Пропускаем, если Hero Name пустой
+    if (!heroName) {
+      continue
+    }
+    
+    // Ищем Hero ID по Hero Name
+    const heroId = heroNameToIdMap.get(heroName)
+    
+    if (heroId) {
+      const row = DATA_START_ROW + i
+      heroIdUpdates.push({row: row, heroId: heroId})
+      filledCount++
+    } else {
+      notFoundCount++
+      console.log(`HeroMapping: не найден Hero ID для "${heroName}"`)
+    }
+  }
+  
+  // Batch-запись Hero ID
+  if (heroIdUpdates.length > 0) {
+    const heroIdCol = getColumnIndex(HERO_MAPPING_COLUMNS.HERO_ID)
+    const updates = heroIdUpdates.map(u => [u.heroId])
+    const rows = heroIdUpdates.map(u => u.row)
+    
+    // Группируем по последовательным строкам для оптимизации
+    heroIdUpdates.forEach(update => {
+      mappingSheet.getRange(update.row, heroIdCol).setValue(update.heroId)
+    })
+    
+    console.log(`HeroMapping: заполнено ${filledCount} Hero ID из HeroStats`)
+  }
+  
+  if (notFoundCount > 0) {
+    console.log(`HeroMapping: не найдено Hero ID для ${notFoundCount} героев`)
+  }
+  
+  return {filled: filledCount, notFound: notFoundCount}
+}
+

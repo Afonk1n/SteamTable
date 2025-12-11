@@ -411,7 +411,10 @@ function heroStats_updateAllStats() {
     let updatedCount = 0
     let errorCount = 0
     
-    // Сохраняем статистику High Rank
+    // ОПТИМИЗАЦИЯ: Собираем все обновления для batch записи
+    const batchUpdates = [] // {row, statsData}
+    
+    // Подготавливаем статистику High Rank
     if (result.highRank && Array.isArray(result.highRank)) {
       result.highRank.forEach(heroStat => {
         try {
@@ -440,9 +443,11 @@ function heroStats_updateAllStats() {
           
           const statsData = {
             pickRate: heroStat.pickRate || 0,
+            pickRatePercent: heroStat.pickRatePercent || 0, // Процент пиков
             winRate: heroStat.winRate || 0,
             banRate: heroStat.banRate || 0,
             contestRate: heroStat.contestRate || 0,
+            contestRatePercent: heroStat.contestRatePercent || 0, // Процент контестов
             matchCount: heroStat.matchCount || 0,
             // Про-статистика
             proPick: heroStat.proPick || 0,
@@ -453,16 +458,16 @@ function heroStats_updateAllStats() {
             proContestRateChange7d: proContestRateChange7d
           }
           
-          heroStats_setStatsData(row, dataCol, statsData)
+          batchUpdates.push({row, statsData})
           updatedCount++
         } catch (e) {
-          console.error(`HeroStats: ошибка сохранения High Rank для героя ${heroStat.heroId}:`, e)
+          console.error(`HeroStats: ошибка подготовки High Rank для героя ${heroStat.heroId}:`, e)
           errorCount++
         }
       })
     }
     
-    // Сохраняем статистику All Ranks
+    // Подготавливаем статистику All Ranks
     if (result.allRanks && Array.isArray(result.allRanks)) {
       result.allRanks.forEach(heroStat => {
         try {
@@ -491,9 +496,11 @@ function heroStats_updateAllStats() {
           
           const statsData = {
             pickRate: heroStat.pickRate || 0,
+            pickRatePercent: heroStat.pickRatePercent || 0, // Процент пиков
             winRate: heroStat.winRate || 0,
             banRate: heroStat.banRate || 0,
             contestRate: heroStat.contestRate || 0,
+            contestRatePercent: heroStat.contestRatePercent || 0, // Процент контестов
             matchCount: heroStat.matchCount || 0,
             // Про-статистика
             proPick: heroStat.proPick || 0,
@@ -504,13 +511,41 @@ function heroStats_updateAllStats() {
             proContestRateChange7d: proContestRateChange7d
           }
           
-          heroStats_setStatsData(row, dataCol, statsData)
+          batchUpdates.push({row, statsData})
           updatedCount++
         } catch (e) {
-          console.error(`HeroStats: ошибка сохранения All Ranks для героя ${heroStat.heroId}:`, e)
+          console.error(`HeroStats: ошибка подготовки All Ranks для героя ${heroStat.heroId}:`, e)
           errorCount++
         }
       })
+    }
+    
+    // БATCH ЗАПИСЬ: Записываем все обновления одним batch операциями
+    if (batchUpdates.length > 0) {
+      // Сортируем по строке для последовательной записи
+      batchUpdates.sort((a, b) => a.row - b.row)
+      
+      // Подготавливаем массив значений для batch записи
+      const values = batchUpdates.map(update => [JSON.stringify(update.statsData)])
+      const rows = batchUpdates.map(update => update.row)
+      
+      // Batch запись: записываем все строки одним запросом
+      // Группируем последовательные строки для эффективной batch записи
+      let batchStart = 0
+      for (let i = 1; i <= rows.length; i++) {
+        // Если строки последовательные или достигли конца массива
+        if (i === rows.length || rows[i] !== rows[i-1] + 1) {
+          const batchSize = i - batchStart
+          const batchRows = rows.slice(batchStart, i)
+          const batchValues = values.slice(batchStart, i)
+          
+          // Записываем batch последовательных строк
+          const range = sheet.getRange(batchRows[0], dataCol, batchSize, 1)
+          range.setValues(batchValues)
+          
+          batchStart = i
+        }
+      }
     }
     
     // Форматируем новую колонку

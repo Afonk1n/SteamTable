@@ -36,17 +36,16 @@ function history_formatTable() {
   sheet.setColumnWidth(10, 130) // J - Рекомендация
   sheet.setColumnWidth(11, 120) // K - Фаза
   sheet.setColumnWidth(12, 100) // L - Потенциал
-  sheet.setColumnWidth(13, 150) // M - Тренд (объединенный, шире)
-  sheet.setColumnWidth(14, 100) // N - Дней смены
-  sheet.setColumnWidth(15, 100) // O - Hero Trend
-  sheet.setColumnWidth(16, 120) // P - Contest Rate Change (7d)
-  sheet.setColumnWidth(17, 120) // Q - Contest Rate (current)
-  sheet.setColumnWidth(18, 100) // R - Pick Rate (current)
-  sheet.setColumnWidth(19, 100) // S - Win Rate (current)
-  sheet.setColumnWidth(20, 150) // T - Hero Name
+  sheet.setColumnWidth(13, 150) // M - Тренд (объединенный формат: "🟨 Боковик 39 д.", убрали колонку Дней смены)
+  sheet.setColumnWidth(14, 100) // N - Hero Trend (перемещено из O)
+  sheet.setColumnWidth(15, 120) // O - Contest Rate Change (7d) (перемещено из P)
+  sheet.setColumnWidth(16, 120) // P - Contest Rate (current) (перемещено из Q)
+  sheet.setColumnWidth(17, 100) // Q - Pick Rate (current) (перемещено из R)
+  sheet.setColumnWidth(18, 100) // R - Win Rate (current) (перемещено из S)
+  sheet.setColumnWidth(19, 150) // S - Hero Name (перемещено из T)
 
   if (lastRow > 1) {
-    const dataCols = 20 // Количество колонок с данными (до дат)
+    const dataCols = 19 // Количество колонок с данными (до дат, было 20)
     sheet
       .getRange(2, 1, lastRow - 1, dataCols)
       .setVerticalAlignment('middle')
@@ -59,8 +58,23 @@ function history_formatTable() {
     const potentialCol = getColumnIndex(HISTORY_COLUMNS.POTENTIAL)
     sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1)
       .setNumberFormat('+0%;-0%;"—"')
-    // Форматирование колонок статистики героя (P-S) как процент
-    sheet.getRange(`P2:S${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT)
+    // Форматирование колонок статистики героя:
+    // P (Contest Rate Change 7d) - процент изменения
+    const contestRateChangeCol = getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CHANGE_7D)
+    sheet.getRange(DATA_START_ROW, contestRateChangeCol, lastRow - 1, 1)
+      .setNumberFormat(NUMBER_FORMATS.PERCENT)
+    // Q (Contest Rate current) - процент участия в контестах
+    const contestRateCol = getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CURRENT)
+    sheet.getRange(DATA_START_ROW, contestRateCol, lastRow - 1, 1)
+      .setNumberFormat(NUMBER_FORMATS.PERCENT)
+    // R (Pick Rate current) - процент пиков
+    const pickRateCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CURRENT)
+    sheet.getRange(DATA_START_ROW, pickRateCol, lastRow - 1, 1)
+      .setNumberFormat(NUMBER_FORMATS.PERCENT)
+    // S (Win Rate current) - процент
+    const winRateCol = getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)
+    sheet.getRange(DATA_START_ROW, winRateCol, lastRow - 1, 1)
+      .setNumberFormat(NUMBER_FORMATS.PERCENT)
   }
 
   sheet.setFrozenRows(HEADER_ROW)
@@ -1585,12 +1599,37 @@ function history_syncHeroStats() {
     }
   }
   
-  // Обновляем колонки для каждой строки
+  // ОПТИМИЗАЦИЯ: Подготавливаем данные для batch записи
+  const heroNames = []
+  const heroTrends = []
+  const contestRateChanges = []
+  const contestRates = []
+  const pickRates = []
+  const winRates = []
+  const updateRows = []
+  
+  const heroNameCol = getColumnIndex(HISTORY_COLUMNS.HERO_NAME)
+  const heroTrendCol = getColumnIndex(HISTORY_COLUMNS.HERO_TREND)
+  const contestRateChangeCol = getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CHANGE_7D)
+  const contestRateCol = getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CURRENT)
+  const pickRateCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CURRENT)
+  const winRateCol = getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)
+  
+  // Подготавливаем все значения
   for (let i = 0; i < itemNames.length; i++) {
     const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) continue
+    if (!itemName) {
+      heroNames.push([''])
+      heroTrends.push([''])
+      contestRateChanges.push([''])
+      contestRates.push([''])
+      pickRates.push([''])
+      winRates.push([''])
+      continue
+    }
     
     const row = DATA_START_ROW + i
+    updateRows.push(row)
     const mapping = mappings[itemName]
     
     if (mapping && mapping.heroId && mapping.category === 'Hero Item') {
@@ -1599,29 +1638,63 @@ function history_syncHeroStats() {
         try {
           const stats = typeof heroData.stats === 'string' ? JSON.parse(heroData.stats) : heroData.stats
           
-          // Обновляем колонки
-          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.HERO_NAME)).setValue(heroData.heroName || '')
           // Рассчитываем Hero Trend Score (передаем объект с ключом rankCategory)
           const heroStatsObj = {[heroData.rankCategory]: heroData.stats}
           const heroTrendScore = analytics_calculateHeroTrendScore(mapping.heroId, heroData.rankCategory, heroStatsObj)
-          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.HERO_TREND)).setValue(analytics_formatScore(heroTrendScore))
-          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CHANGE_7D)).setValue(stats.contestRateChange7d || 0)
-          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CURRENT)).setValue(stats.contestRate || 0)
-          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CURRENT)).setValue(stats.pickRate || 0)
-          sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)).setValue(stats.winRate || 0)
+          
+          heroNames.push([heroData.heroName || ''])
+          heroTrends.push([analytics_formatScore(heroTrendScore)])
+          contestRateChanges.push([stats.contestRateChange7d || 0])
+          // Используем проценты, если доступны, иначе абсолютные числа
+          contestRates.push([stats.contestRatePercent !== undefined ? stats.contestRatePercent : (stats.contestRate || 0)])
+          pickRates.push([stats.pickRatePercent !== undefined ? stats.pickRatePercent : (stats.pickRate || 0)])
+          winRates.push([stats.winRate || 0])
         } catch (e) {
-          console.log(`Ошибка при обновлении статистики для ${itemName}: ${e.message}`)
+          console.log(`Ошибка при подготовке статистики для ${itemName}: ${e.message}`)
+          heroNames.push([''])
+          heroTrends.push([''])
+          contestRateChanges.push([''])
+          contestRates.push([''])
+          pickRates.push([''])
+          winRates.push([''])
         }
+      } else {
+        // Нет данных о герое
+        heroNames.push([''])
+        heroTrends.push([''])
+        contestRateChanges.push([''])
+        contestRates.push([''])
+        pickRates.push([''])
+        winRates.push([''])
       }
     } else {
       // Общий предмет - очищаем колонки
-      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.HERO_NAME)).setValue('')
-      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.HERO_TREND)).setValue('')
-      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CHANGE_7D)).setValue('')
-      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CURRENT)).setValue('')
-      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CURRENT)).setValue('')
-      sheet.getRange(row, getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)).setValue('')
+      heroNames.push([''])
+      heroTrends.push([''])
+      contestRateChanges.push([''])
+      contestRates.push([''])
+      pickRates.push([''])
+      winRates.push([''])
     }
+  }
+  
+  // BATCH ЗАПИСЬ: Записываем все колонки одним batch операциями
+  if (updateRows.length > 0 || heroNames.length > 0) {
+    const count = heroNames.length
+    sheet.getRange(DATA_START_ROW, heroNameCol, count, 1).setValues(heroNames)
+    sheet.getRange(DATA_START_ROW, heroTrendCol, count, 1).setValues(heroTrends)
+    sheet.getRange(DATA_START_ROW, contestRateChangeCol, count, 1).setValues(contestRateChanges)
+    sheet.getRange(DATA_START_ROW, contestRateCol, count, 1).setValues(contestRates)
+    sheet.getRange(DATA_START_ROW, pickRateCol, count, 1).setValues(pickRates)
+    sheet.getRange(DATA_START_ROW, winRateCol, count, 1).setValues(winRates)
+  }
+  
+  // Проверяем изменения Hero Trend Score (важные уведомления)
+  try {
+    telegram_checkHeroTrendChanges_()
+  } catch (e) {
+    console.error('History: ошибка при проверке изменений Hero Trend Score:', e)
+    // Не прерываем выполнение, просто логируем ошибку
   }
 }
 
@@ -1721,6 +1794,14 @@ function history_updateInvestmentScores() {
   const count = investmentScores.length
   if (count > 0) {
     sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.INVESTMENT_SCORE), count, 1).setValues(investmentScores)
+  }
+  
+  // Проверяем возможности для покупки (критические уведомления)
+  try {
+    telegram_checkHistoryInvestmentOpportunities_()
+  } catch (e) {
+    console.error('History: ошибка при проверке возможностей для покупки:', e)
+    // Не прерываем выполнение, просто логируем ошибку
   }
 }
 

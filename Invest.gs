@@ -319,11 +319,9 @@ function invest_formatTable() {
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE) // O
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.PHASE), COLUMN_WIDTHS.WIDE) // P
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.POTENTIAL), COLUMN_WIDTHS.MEDIUM) // Q
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.WIDE) // R
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.DAYS_CHANGE), COLUMN_WIDTHS.MEDIUM) // S
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.HERO_TREND), COLUMN_WIDTHS.MEDIUM) // T
-  sheet.setColumnWidths(getColumnIndex(INVEST_COLUMNS.VOLATILITY_INDEX), 5, COLUMN_WIDTHS.MEDIUM) // U-Y (метрики)
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // Z
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.WIDE) // R - Тренд (объединенный формат: "🟨 Боковик 39 д.")
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.HERO_TREND), COLUMN_WIDTHS.MEDIUM) // S (перемещено из T, убрали DAYS_CHANGE)
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // T (перемещено из U)
 
   if (lastRow > 1) {
     sheet.getRange(`D2:I${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // D-G, H (с комиссией), I (Профит)
@@ -333,15 +331,14 @@ function invest_formatTable() {
     // Форматирование колонки Потенциал (Q) как процент с знаком "+"
     const potentialCol = getColumnIndex(INVEST_COLUMNS.POTENTIAL)
     sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1).setNumberFormat('+0%;-0%;"—"')
-    // Форматирование метрик (U-Y) как процент или число
-    sheet.getRange(`U2:Y${lastRow}`).setNumberFormat('0.00') // Метрики как числа 0-1
+    // Метрики удалены из отображения (остаются в коде для расчетов)
 
     const dataRange = sheet.getRange(DATA_START_ROW, 1, lastRow - 1, headers.length)
     dataRange.setVerticalAlignment('middle').setWrap(true)
 
     sheet.getRange(`A2:A${lastRow}`).setHorizontalAlignment('center')
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
-    sheet.getRange(`C2:AB${lastRow}`).setHorizontalAlignment('center') // До AB (чекбоксы)
+    sheet.getRange(`C2:AA${lastRow}`).setHorizontalAlignment('center') // До AA (чекбокс Продать)
   }
 
   if (lastRow > 1) {
@@ -365,28 +362,14 @@ function invest_formatTable() {
   }
 
   // Заморозка строки уже выполнена в formatTableBase_()
-  // Добавляем колонки чекбоксов «Купить?» и «Продать?» если отсутствуют
+  // Добавляем колонку чекбокса «Продать» если отсутствует (убрали «Купить?»)
   const lastCol = sheet.getLastColumn()
-  const buyHeader = 'Купить?'
-  const sellHeader = 'Продать?'
-  let buyCol = null
+  const sellHeader = 'Продать'
   let sellCol = null
   
   for (let c = 1; c <= lastCol; c++) {
     const header = sheet.getRange(1, c).getValue()
-    if (header === buyHeader) buyCol = c
     if (header === sellHeader) sellCol = c
-  }
-  
-  if (!buyCol) {
-    buyCol = getColumnIndex(INVEST_COLUMNS.BUY_CHECKBOX)
-    sheet.getRange(1, buyCol).setValue(buyHeader)
-    formatHeaderRange_(sheet.getRange(HEADER_ROW, buyCol, 1, 1))
-    if (lastRow > 1) {
-      const rng = sheet.getRange(DATA_START_ROW, buyCol, lastRow - 1, 1)
-      rng.insertCheckboxes()
-      rng.setHorizontalAlignment('center')
-    }
   }
   
   if (!sellCol) {
@@ -448,7 +431,7 @@ function invest_syncExtendedAnalyticsFromHistory(updateAll = true) {
 }
 
 /**
- * Комплексное обновление всей аналитики (Min/Max + Тренд/Дней смены + Фаза/Потенциал/Рекомендация)
+ * Комплексное обновление всей аналитики (Min/Max + Тренд (объединенный) + Фаза/Потенциал/Рекомендация)
  */
 function invest_updateAllAnalytics() {
   updateAllAnalyticsManual_(
@@ -579,16 +562,13 @@ function invest_calculateAllMetrics() {
     heroTrends.push([heroTrendValue])
   }
   
-  // Batch-запись всех метрик
-  const count = liquidityScores.length
+  // Batch-запись Hero Trend (метрики удалены из отображения, но расчеты остаются для Investment Score)
+  const count = heroTrends.length
   if (count > 0) {
-    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.LIQUIDITY_SCORE), count, 1).setValues(liquidityScores)
-    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.DEMAND_RATIO), count, 1).setValues(demandRatios)
-    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.PRICE_MOMENTUM), count, 1).setValues(priceMomenta)
-    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.SALES_TREND), count, 1).setValues(salesTrends)
-    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.VOLATILITY_INDEX), count, 1).setValues(volatilityIndices)
     sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.HERO_TREND), count, 1).setValues(heroTrends)
   }
+  // Метрики (liquidityScores, demandRatios, priceMomenta, salesTrends, volatilityIndices) 
+  // рассчитываются, но не записываются в таблицу - используются только для расчета Investment Score
 }
 
 /**

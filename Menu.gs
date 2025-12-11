@@ -157,6 +157,8 @@ function onOpen() {
       .addItem('Форматирование', 'heroMapping_formatTable')
       .addItem('Автоопределение героев', 'heroMapping_autoDetectFromSteamWebAPI')
       .addItem('Синхронизировать с History', 'heroMapping_syncWithHistory')
+      .addSeparator()
+      .addItem('Заполнить пустые Hero ID', 'heroMapping_fillMissingHeroIdsMenu')
     )
     .addSeparator()
     .addSubMenu(ui.createMenu('Синхронизация')
@@ -372,13 +374,17 @@ function setupHeroStats() {
     heroStats_updateAllStats()
     console.log('Setup: статистика героев обновлена')
     
+    console.log('Setup: заполнение пустых Hero ID в HeroMapping...')
+    const fillResult = heroMapping_fillMissingHeroIds()
+    console.log(`Setup: заполнено ${fillResult.filled} Hero ID, не найдено ${fillResult.notFound}`)
+    
     console.log('Setup: синхронизация статистики в History...')
     history_syncHeroStats()
     console.log('Setup: статистика синхронизирована в History')
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(1)
     console.log(`Setup: настройка статистики героев завершена за ${duration} сек`)
-    logAutoAction_('Setup', 'Настройка статистики героев', `OK (${duration} сек)`)
+    logAutoAction_('Setup', 'Настройка статистики героев', `OK (${duration} сек, заполнено Hero ID: ${fillResult.filled})`)
     
   } catch (e) {
     console.error('Setup: ошибка настройки статистики героев:', e)
@@ -855,6 +861,15 @@ function autoArchiveHeroStats() {
     console.log('autoArchiveHeroStats: архивация завершена')
     logAutoAction_('AutoArchive', 'Архивация HeroStats', 'Завершено')
     
+    // Очистка старых уведомлений Telegram (старше 7 дней)
+    try {
+      telegram_cleanupOldNotifications_()
+      console.log('autoArchiveHeroStats: очистка старых уведомлений завершена')
+    } catch (e) {
+      console.error('autoArchiveHeroStats: ошибка очистки уведомлений:', e)
+      // Не прерываем выполнение, просто логируем ошибку
+    }
+    
   } catch (e) {
     console.error('autoArchiveHeroStats: ошибка архивации:', e)
     logAutoAction_('AutoArchive', 'Архивация HeroStats', `Ошибка: ${e.message}`)
@@ -917,6 +932,18 @@ function autoSyncHeroMapping() {
       // Продолжаем выполнение, даже если автоопределение не удалось
     }
     
+    // 3. Заполняем пустые Hero ID из HeroStats (если есть данные)
+    try {
+      const fillResult = heroMapping_fillMissingHeroIds()
+      if (fillResult.filled > 0) {
+        console.log(`autoSyncHeroMapping: заполнено ${fillResult.filled} Hero ID из HeroStats`)
+        logAutoAction_('AutoSync', 'Заполнение Hero ID', `Заполнено: ${fillResult.filled}`)
+      }
+    } catch (e) {
+      console.error('autoSyncHeroMapping: ошибка заполнения Hero ID:', e)
+      // Продолжаем выполнение, даже если заполнение не удалось
+    }
+    
     console.log('autoSyncHeroMapping: автоматическая синхронизация завершена')
     logAutoAction_('AutoSync', 'Синхронизация HeroMapping', 'Завершено')
     
@@ -940,5 +967,50 @@ function autoSyncHeroMapping() {
     }
   } finally {
     releaseLock_(lockKey)
+  }
+}
+
+/**
+ * Меню для заполнения пустых Hero ID в HeroMapping
+ */
+function heroMapping_fillMissingHeroIdsMenu() {
+  const ui = SpreadsheetApp.getUi()
+  
+  const response = ui.alert(
+    'Заполнение пустых Hero ID',
+    'Эта функция заполнит пустые Hero ID в HeroMapping, используя данные из HeroStats.\n\n' +
+    'Для этого нужны:\n' +
+    '• Заполненные Hero Name в HeroMapping\n' +
+    '• Обновленная статистика в HeroStats\n\n' +
+    'Продолжить?',
+    ui.ButtonSet.YES_NO
+  )
+  
+  if (response !== ui.Button.YES) {
+    return
+  }
+  
+  try {
+    ui.alert('Начинаем заполнение Hero ID...')
+    
+    const result = heroMapping_fillMissingHeroIds()
+    
+    ui.alert(
+      'Заполнение завершено',
+      `✅ Заполнено Hero ID: ${result.filled}\n` +
+      (result.notFound > 0 ? `⚠️ Не найдено: ${result.notFound}\n\n` : '\n') +
+      (result.notFound > 0 
+        ? 'Не найденные герои могут быть:\n' +
+          '• Не обновлены в HeroStats\n' +
+          '• Имеют другое имя в HeroStats\n'
+        : 'Все Hero ID успешно заполнены!'),
+      ui.ButtonSet.OK
+    )
+    
+    logAutoAction_('HeroMapping', 'Заполнение Hero ID', `Заполнено: ${result.filled}, не найдено: ${result.notFound}`)
+    
+  } catch (e) {
+    console.error('HeroMapping: ошибка заполнения Hero ID:', e)
+    ui.alert('Ошибка', 'Произошла ошибка при заполнении Hero ID: ' + e.message, ui.ButtonSet.OK)
   }
 }

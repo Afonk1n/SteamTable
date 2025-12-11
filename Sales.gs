@@ -123,11 +123,10 @@ function sales_formatTable() {
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.LINK), COLUMN_WIDTHS.NARROW) // H
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.MIN_PRICE), COLUMN_WIDTHS.MEDIUM) // I
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.MAX_PRICE), COLUMN_WIDTHS.MEDIUM) // J
-  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.BUYBACK_SCORE), 130) // K
-  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE) // L
-  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.HERO_TREND), COLUMN_WIDTHS.MEDIUM) // M
-  sheet.setColumnWidths(getColumnIndex(SALES_COLUMNS.VOLATILITY_INDEX), 5, COLUMN_WIDTHS.MEDIUM) // N-R (метрики)
-  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // S
+    sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.BUYBACK_SCORE), 130) // K
+    sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE) // L
+    sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.HERO_TREND), COLUMN_WIDTHS.MEDIUM) // M
+    sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // N
 
   if (lastRow > 1) {
     // Дополнительная проверка headers перед использованием
@@ -140,8 +139,7 @@ function sales_formatTable() {
     sheet.getRange(`C2:F${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // C-F: Количество, Цена продажи, Текущая цена, Просадка
     sheet.getRange(`G2:G${lastRow}`).setNumberFormat(NUMBER_FORMATS.PERCENT) // G: Процент просадки
     sheet.getRange(`I2:J${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // I-J: Min, Max
-    // Форматирование метрик (N-R) как число
-    sheet.getRange(`N2:R${lastRow}`).setNumberFormat('0.00') // Метрики как числа 0-1
+    // Метрики удалены из отображения (остаются в коде для расчетов)
 
     sheet
       .getRange(DATA_START_ROW, 1, lastRow - 1, headers.length)
@@ -370,16 +368,13 @@ function sales_calculateAllMetrics() {
     heroTrends.push([heroTrendValue])
   }
   
-  // Batch-запись всех метрик
-  const count = liquidityScores.length
+  // Batch-запись Hero Trend (метрики удалены из отображения, но расчеты остаются для Buyback Score)
+  const count = heroTrends.length
   if (count > 0) {
-    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.LIQUIDITY_SCORE), count, 1).setValues(liquidityScores)
-    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.DEMAND_RATIO), count, 1).setValues(demandRatios)
-    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.PRICE_MOMENTUM), count, 1).setValues(priceMomenta)
-    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.SALES_TREND), count, 1).setValues(salesTrends)
-    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.VOLATILITY_INDEX), count, 1).setValues(volatilityIndices)
     sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.HERO_TREND), count, 1).setValues(heroTrends)
   }
+  // Метрики (liquidityScores, demandRatios, priceMomenta, salesTrends, volatilityIndices) 
+  // рассчитываются, но не записываются в таблицу - используются только для расчета Buyback Score
 }
 
 /**
@@ -486,6 +481,14 @@ function sales_updateBuybackScores() {
   if (count > 0) {
     sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.BUYBACK_SCORE), count, 1).setValues(buybackScores)
     sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.RISK_LEVEL), count, 1).setValues(riskLevels)
+  }
+  
+  // Проверяем возможности для откупа (критические уведомления)
+  try {
+    telegram_checkSalesBuybackOpportunities_()
+  } catch (e) {
+    console.error('Sales: ошибка при проверке возможностей для откупа:', e)
+    // Не прерываем выполнение, просто логируем ошибку
   }
 }
 
