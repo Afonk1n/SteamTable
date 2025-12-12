@@ -389,23 +389,141 @@ function heroMapping_updateItemsBatch_(updates) {
 }
 
 /**
+ * Генерирует расширенный список ключей для поиска предмета
+ * Учитывает "The", таунты, специальные символы
+ * @param {string} itemName - Название предмета
+ * @returns {Array<string>} Массив вариантов названия для поиска
+ * @private
+ */
+function heroMapping_generateSearchKeys_(itemName) {
+  const base = itemName.toLowerCase().trim()
+  const keys = new Set()
+  
+  // Базовые варианты
+  keys.add(base)
+  keys.add(base.replace(/[''""`]/g, ''))
+  keys.add(base.replace(/[''""`]/g, '').replace(/\s+/g, ' '))
+  
+  // Обработка "The" в начале
+  if (base.startsWith('the ')) {
+    const withoutThe = base.substring(4).trim()
+    keys.add(withoutThe)
+    keys.add(withoutThe.replace(/[''""`]/g, ''))
+    keys.add(withoutThe.replace(/[''""`]/g, '').replace(/\s+/g, ' '))
+  } else {
+    const withThe = 'the ' + base
+    keys.add(withThe)
+    keys.add(withThe.replace(/[''""`]/g, ''))
+    keys.add(withThe.replace(/[''""`]/g, '').replace(/\s+/g, ' '))
+  }
+  
+  // Обработка таунтов (Taunt: *)
+  if (base.includes('taunt:')) {
+    const withoutTaunt = base.replace(/taunt:\s*/gi, '').trim()
+    keys.add(withoutTaunt)
+    keys.add(withoutTaunt.replace(/[''""`]/g, ''))
+    keys.add(withoutTaunt.replace(/[''""`]/g, '').replace(/\s+/g, ' '))
+  }
+  
+  // Удаление дефисов и специальных символов
+  keys.add(base.replace(/[-–—]/g, ' ').replace(/\s+/g, ' ').trim())
+  keys.add(base.replace(/[-–—'""`]/g, ' ').replace(/\s+/g, ' ').trim())
+  
+  return Array.from(keys).filter(k => k.length > 0)
+}
+
+/**
+ * Улучшенное сопоставление названий предметов
+ * Учитывает различные варианты написания, "The", таунты, специальные символы
+ * @param {string} searchName - Название для поиска
+ * @param {string} apiName - Название из API
+ * @returns {boolean} true если названия совпадают
+ * @private
+ */
+function heroMapping_matchItemNames_(searchName, apiName) {
+  if (!searchName || !apiName) return false
+  
+  const normalize = (name) => {
+    return name.toLowerCase().trim()
+      .replace(/[''""`]/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/[-–—]/g, ' ')
+      .trim()
+  }
+  
+  const normalizeWithoutThe = (name) => {
+    let normalized = normalize(name)
+    if (normalized.startsWith('the ')) {
+      normalized = normalized.substring(4).trim()
+    }
+    return normalized
+  }
+  
+  const normalizeWithoutTaunt = (name) => {
+    return normalize(name).replace(/taunt:\s*/gi, '').trim()
+  }
+  
+  const searchNorm = normalize(searchName)
+  const apiNorm = normalize(apiName)
+  
+  // Точное совпадение
+  if (searchNorm === apiNorm) return true
+  
+  // Совпадение без "The"
+  if (normalizeWithoutThe(searchNorm) === normalizeWithoutThe(apiNorm)) return true
+  
+  // Совпадение без таунта
+  if (normalizeWithoutTaunt(searchNorm) === normalizeWithoutTaunt(apiNorm)) return true
+  
+  // Совпадение без "The" и таунта
+  const searchNoTheNoTaunt = normalizeWithoutTaunt(normalizeWithoutThe(searchNorm))
+  const apiNoTheNoTaunt = normalizeWithoutTaunt(normalizeWithoutThe(apiNorm))
+  if (searchNoTheNoTaunt === apiNoTheNoTaunt) return true
+  
+  // Частичное совпадение (если одно название содержит другое)
+  if (searchNorm.length > 10 && apiNorm.length > 10) {
+    if (searchNorm.includes(apiNorm) || apiNorm.includes(searchNorm)) {
+      return true
+    }
+  }
+  
+  return false
+}
+
+/**
  * Автоматическое определение героев через SteamWebAPI.ru (tag5)
  * Обрабатывает все предметы из History с batch операциями и fallback на item_by_nameid
+ * Улучшено для обработки проблемных предметов (The, таунты, специальные символы)
+ * @param {boolean} silent - Если true, не показывает UI сообщения и диалоги (для автоматических вызовов)
  */
-function heroMapping_autoDetectFromSteamWebAPI() {
+function heroMapping_autoDetectFromSteamWebAPI(silent = false) {
   console.log('HeroMapping: начало автоматического определения героев')
   
   const historySheet = getHistorySheet_()
   if (!historySheet) {
-    console.error('HeroMapping: лист History не найден')
-    SpreadsheetApp.getUi().alert('Ошибка: лист History не найден')
+    const message = 'Ошибка: лист History не найден'
+    console.error(`HeroMapping: ${message}`)
+    if (!silent) {
+      try {
+        SpreadsheetApp.getUi().alert(message)
+      } catch (e) {
+        // UI недоступен (вызов из триггера)
+      }
+    }
     return
   }
   
   const lastRow = historySheet.getLastRow()
   if (lastRow < DATA_START_ROW) {
-    console.log('HeroMapping: нет предметов в History')
-    SpreadsheetApp.getUi().alert('Нет предметов в History для автоопределения')
+    const message = 'Нет предметов в History для автоопределения'
+    console.log(`HeroMapping: ${message}`)
+    if (!silent) {
+      try {
+        SpreadsheetApp.getUi().alert(message)
+      } catch (e) {
+        // UI недоступен (вызов из триггера)
+      }
+    }
     return
   }
   
@@ -428,16 +546,23 @@ function heroMapping_autoDetectFromSteamWebAPI() {
     return
   }
   
-  // Диалог подтверждения
-  const ui = SpreadsheetApp.getUi()
-  const confirmResponse = ui.alert(
-    'Автоопределение героев',
-    `Будет обработано ${uniqueItemNames.length} предметов.\nЭто может занять несколько минут.\n\nПродолжить?`,
-    ui.ButtonSet.YES_NO
-  )
-  
-  if (confirmResponse !== ui.Button.YES) {
-    return
+  // Диалог подтверждения (только если не silent режим)
+  if (!silent) {
+    try {
+      const ui = SpreadsheetApp.getUi()
+      const confirmResponse = ui.alert(
+        'Автоопределение героев',
+        `Будет обработано ${uniqueItemNames.length} предметов.\nЭто может занять несколько минут.\n\nПродолжить?`,
+        ui.ButtonSet.YES_NO
+      )
+      
+      if (confirmResponse !== ui.Button.YES) {
+        return
+      }
+    } catch (e) {
+      // UI недоступен (вызов из триггера), продолжаем выполнение
+      console.log('HeroMapping: UI недоступен, продолжаем автоматическое выполнение')
+    }
   }
   
   // Получаем данные через SteamWebAPI.ru пакетами (с автоматическим fallback)
@@ -450,11 +575,9 @@ function heroMapping_autoDetectFromSteamWebAPI() {
   uniqueItemNames.forEach(itemName => {
     // Пробуем найти в результате (включая результаты fallback)
     let itemData = null
-    const searchKeys = [
-      itemName.toLowerCase().trim(),
-      itemName.toLowerCase().trim().replace(/[''""`]/g, ''),
-      itemName.toLowerCase().trim().replace(/[''""`]/g, '').replace(/\s+/g, ' ')
-    ]
+    
+    // Создаем расширенный список вариантов поиска с учетом проблемных названий
+    const searchKeys = heroMapping_generateSearchKeys_(itemName)
     
     // Ищем в batchResult.items (объект с ключами из normalizedname/marketname/markethashname)
     if (batchResult.items) {
@@ -465,7 +588,7 @@ function heroMapping_autoDetectFromSteamWebAPI() {
         }
       }
       
-      // Если не нашли по ключам, ищем по markethashname в значениях
+      // Если не нашли по ключам, ищем по markethashname в значениях с улучшенным сопоставлением
       if (!itemData) {
         for (const itemKey in batchResult.items) {
           const item = batchResult.items[itemKey]
@@ -476,12 +599,8 @@ function heroMapping_autoDetectFromSteamWebAPI() {
           ].filter(n => n && n.trim().length > 0)
           
           for (const itemNameFromAPI of itemNames) {
-            const normalizedItemName = itemNameFromAPI.toLowerCase().trim()
-            const normalizedSearchName = itemName.toLowerCase().trim()
-            
-            if (normalizedItemName === normalizedSearchName ||
-                normalizedItemName.replace(/[''""`]/g, '') === normalizedSearchName.replace(/[''""`]/g, '') ||
-                normalizedItemName.replace(/[''""`]/g, '').replace(/\s+/g, ' ') === normalizedSearchName.replace(/[''""`]/g, '').replace(/\s+/g, ' ')) {
+            // Используем улучшенное сопоставление
+            if (heroMapping_matchItemNames_(itemName, itemNameFromAPI)) {
               itemData = item
               break
             }
@@ -533,20 +652,35 @@ function heroMapping_autoDetectFromSteamWebAPI() {
   
   try {
     logAutoAction_('HeroMapping', 'Автоопределение героев', `OK (определено: ${detectedCount}, пропущено: ${skippedCount})`)
-    SpreadsheetApp.getUi().alert(`Автоопределение завершено!\n\nОпределено: ${detectedCount}\nПропущено: ${skippedCount}`)
+    if (!silent) {
+      try {
+        SpreadsheetApp.getUi().alert(`Автоопределение завершено!\n\nОпределено: ${detectedCount}\nПропущено: ${skippedCount}`)
+      } catch (e) {
+        // UI недоступен (вызов из триггера)
+      }
+    }
   } catch (e) {
-    console.log('HeroMapping: невозможно показать UI')
+    console.log('HeroMapping: ошибка при логировании')
   }
 }
 
 /**
  * Синхронизирует предметы из History с HeroMapping
  * Добавляет только новые предметы, если их еще нет (batch операция)
+ * @param {boolean} silent - Если true, не показывает UI сообщения (для автоматических вызовов)
  */
-function heroMapping_syncWithHistory() {
+function heroMapping_syncWithHistory(silent = false) {
   const historySheet = getHistorySheet_()
   if (!historySheet) {
-    SpreadsheetApp.getUi().alert('Ошибка: лист History не найден')
+    const message = 'Ошибка: лист History не найден'
+    console.error(`HeroMapping: ${message}`)
+    if (!silent) {
+      try {
+        SpreadsheetApp.getUi().alert(message)
+      } catch (e) {
+        // UI недоступен (вызов из триггера)
+      }
+    }
     return
   }
   
@@ -554,7 +688,15 @@ function heroMapping_syncWithHistory() {
   const historyLastRow = historySheet.getLastRow()
   
   if (historyLastRow < DATA_START_ROW) {
-    SpreadsheetApp.getUi().alert('Нет предметов в History для синхронизации')
+    const message = 'Нет предметов в History для синхронизации'
+    console.log(`HeroMapping: ${message}`)
+    if (!silent) {
+      try {
+        SpreadsheetApp.getUi().alert(message)
+      } catch (e) {
+        // UI недоступен (вызов из триггера)
+      }
+    }
     return
   }
   
@@ -592,7 +734,15 @@ function heroMapping_syncWithHistory() {
   })
   
   if (newItems.length === 0) {
-    SpreadsheetApp.getUi().alert('Все предметы из History уже синхронизированы')
+    const message = 'Все предметы из History уже синхронизированы'
+    console.log(`HeroMapping: ${message}`)
+    if (!silent) {
+      try {
+        SpreadsheetApp.getUi().alert(message)
+      } catch (e) {
+        // UI недоступен (вызов из триггера)
+      }
+    }
     return
   }
   
@@ -610,9 +760,15 @@ function heroMapping_syncWithHistory() {
   
   try {
     logAutoAction_('HeroMapping', 'Синхронизация с History', `Добавлено: ${newItems.length} новых предметов`)
-    SpreadsheetApp.getUi().alert(`Синхронизация завершена!\n\nДобавлено новых предметов: ${newItems.length}`)
+    if (!silent) {
+      try {
+        SpreadsheetApp.getUi().alert(`Синхронизация завершена!\n\nДобавлено новых предметов: ${newItems.length}`)
+      } catch (e) {
+        // UI недоступен (вызов из триггера)
+      }
+    }
   } catch (e) {
-    console.log('HeroMapping: невозможно показать UI')
+    console.log('HeroMapping: ошибка при логировании')
   }
 }
 

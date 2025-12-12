@@ -113,16 +113,28 @@
 
 **Что делает:**
 - Автоматически выполняет все необходимые шаги для полной настройки:
-  1. Расчет Min/Max из SteamWebAPI (если отсутствуют)
-  2. Настройка HeroMapping (синхронизация + автоопределение героев)
-  3. Обновление статистики героев (с расчетом процентов) → автоматическое заполнение Hero ID → синхронизация в History
-  4. Обновление аналитики History и Investment Scores
+  1. **Шаг 0:** Расчет Min/Max из SteamWebAPI (только для отсутствующих, автоматически пропускается если все заполнено)
+  2. **Шаг 1:** Настройка HeroMapping (синхронизация + автоопределение героев)
+     - Синхронизирует предметы из History в HeroMapping
+     - Автоматически определяет героев через SteamWebAPI.ru (улучшенный поиск для проблемных предметов)
+  3. **Шаг 2:** Обновление статистики героев
+     - Получает статистику через OpenDota API
+     - Автоматически заполняет пустые Hero ID в HeroMapping из HeroStats
+     - Синхронизирует статистику героев в History (колонки N-S)
+  4. **Шаг 3:** Обновление аналитики и метрик
+     - Обновляет всю аналитику History (Min/Max из существующих цен, тренды, фазы, потенциал)
+     - Обновляет Investment Scores для всех предметов в History
 
 **⚠️ УСЛОВИЯ:**
 - Таблицы должны быть инициализированы (Этап 1)
 - Предметы должны быть добавлены в History (Этап 2)
 
 **Результат:** Система полностью настроена и готова к работе.
+
+**Примечание:** 
+- Все шаги выполняются последовательно без дополнительных диалогов (кроме начального подтверждения)
+- Если какой-то шаг не требуется (например, Min/Max уже заполнены), он автоматически пропускается
+- При ошибке на любом шаге выполнение останавливается с сообщением об ошибке
 
 **Альтернатива:** Можно выполнить шаги по отдельности:
 - `Шаг 0: Расчет Min/Max из SteamWebAPI`
@@ -274,8 +286,13 @@
 - [x] `initializeAllTables` - Menu.gs
 - [x] `performInitialSetup` - Menu.gs
 - [x] `history_updateAllPrices` - History.gs
-- [x] `priceHistory_calculateMinMaxForAllItems` - PriceHistoryUtils.gs
-- [x] `priceHistory_calculateMinMaxForMissingItems` - PriceHistoryUtils.gs
+- [x] `priceHistory_calculateMinMaxForAllItems` - SteamWebAPI.gs
+- [x] `priceHistory_calculateMinMaxForMissingItems` - SteamWebAPI.gs
+- [x] `performFullSetup` - Menu.gs (полная настройка)
+- [x] `setupMinMax` - Menu.gs
+- [x] `setupHeroMapping` - Menu.gs
+- [x] `setupHeroStats` - Menu.gs
+- [x] `setupAnalytics` - Menu.gs
 - [x] `invest_formatTable` - Invest.gs
 - [x] `invest_updateImagesAndLinks` - Invest.gs
 - [x] `invest_findDuplicates` - Invest.gs

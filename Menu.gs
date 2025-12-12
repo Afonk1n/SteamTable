@@ -1037,9 +1037,9 @@ function autoSyncHeroMapping() {
     console.log('autoSyncHeroMapping: начало автоматической синхронизации HeroMapping')
     logAutoAction_('AutoSync', 'Синхронизация HeroMapping', 'Начало')
     
-    // 1. Синхронизируем предметы из History
+    // 1. Синхронизируем предметы из History (silent режим для автоматических вызовов)
     try {
-      heroMapping_syncWithHistory()
+      heroMapping_syncWithHistory(true) // silent = true для автоматических вызовов
       console.log('autoSyncHeroMapping: предметы синхронизированы с History')
     } catch (e) {
       console.error('autoSyncHeroMapping: ошибка синхронизации предметов:', e)
@@ -1048,9 +1048,9 @@ function autoSyncHeroMapping() {
       return
     }
     
-    // 2. Автоматически определяем героев для новых предметов
+    // 2. Автоматически определяем героев для новых предметов (silent режим для автоматических вызовов)
     try {
-      heroMapping_autoDetectFromSteamWebAPI()
+      heroMapping_autoDetectFromSteamWebAPI(true) // silent = true для автоматических вызовов
       console.log('autoSyncHeroMapping: герои определены для новых предметов')
     } catch (e) {
       console.error('autoSyncHeroMapping: ошибка автоопределения героев:', e)

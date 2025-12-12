@@ -35,10 +35,9 @@
 12. **PortfolioStats.gs** - Трекинг истории портфеля (сохранение метрик)
 13. **Telegram.gs** - Интеграция с Telegram Bot API (уведомления, отчеты)
 14. **OpenDotaAPI.gs** - Интеграция с OpenDota API для статистики героев (пикрейт, винрейт, банрейт, про-статистика)
-15. **SteamWebAPI.gs** - Интеграция с SteamWebAPI.ru для получения данных о предметах (цены, теги, изображения, метрики)
+15. **SteamWebAPI.gs** - Интеграция с SteamWebAPI.ru для получения данных о предметах (цены, теги, изображения, метрики) + утилиты для расчета Min/Max цен (объединены из PriceHistoryUtils.gs)
 16. **HeroStats.gs** - Управление листом HeroStats (статистика героев по датам, включая про-статистику)
 17. **HeroMapping.gs** - Управление листом HeroMapping (связь предметов с героями)
-18. **PriceHistoryUtils.gs** - Утилиты для расчета Min/Max цен через SteamWebAPI.ru
 
 ### Листы таблицы:
 
@@ -572,8 +571,21 @@ History (сохранение цен по датам)
 - `steamWebAPI_fetchItemByNameIdViaName(itemName, game)` - Получение данных по названию через item_by_nameid (fallback)
   - Использует параметр `name` для поиска по Market Hash Name
   - API автоматически определяет NameID из базы данных
-  - Используется как fallback в `PriceHistoryUtils` и `HeroMapping`
+  - Используется как fallback в `HeroMapping` и утилитах расчета Min/Max
 - `steamWebAPI_testConnection()` - Тест подключения к API
+
+### Утилиты для расчета Min/Max цен (в SteamWebAPI.gs)
+
+- `priceHistory_calculateMinMaxForAllItems(onlyMissing)` - Расчет Min/Max для всех предметов из History через SteamWebAPI.ru
+  - Использует SteamWebAPI.ru вместо pricehistory эндпоинта (быстрее, надежнее, до 50 предметов за раз)
+  - Если `onlyMissing = true`, обновляет только предметы без Min/Max
+- `priceHistory_calculateMinMaxForMissingItems()` - Расчет Min/Max только для предметов, у которых Min/Max отсутствуют
+- `priceHistory_updateMinMaxInHistory(itemName, minPrice, maxPrice)` - Обновление Min/Max для одного предмета в History
+- `priceHistory_checkMinMaxExists(itemName)` - Проверка наличия Min/Max у предмета в History
+- `priceHistory_fetchHistoryForItem(itemName, appid)` - Получение истории цен через pricehistory эндпоинт Steam (fallback)
+- `priceHistory_parseHistoryData(pricesData)` - Парсинг данных истории цен из формата pricehistory
+- `priceHistory_calculateMinMax(parsedHistory)` - Расчет Min/Max из распарсенной истории
+- `priceHistory_calculateMinMaxForSingleItem(itemName)` - Расчет Min/Max для одного предмета (вспомогательная функция)
 
 ### OpenDotaAPI
 
@@ -955,7 +967,7 @@ avgProfitability = средняя прибыльность всех позици
 - [ ] API запросы используют retry логику и обработку ошибок (429, таймауты)
 - [ ] Fallback механизмы работают (например, item_by_nameid для предметов, не найденных через основной endpoint)
   - `steamWebAPI_getItemData()` автоматически использует fallback на `/api/item_by_nameid` с поиском по Market Hash Name
-  - `PriceHistoryUtils` и `HeroMapping` также используют fallback для не найденных предметов
+  - `HeroMapping` и утилиты расчета Min/Max в `SteamWebAPI.gs` также используют fallback для не найденных предметов
 - [ ] Batch операции для API запросов (SteamWebAPI.ru поддерживает до 50 предметов за раз)
 
 ---
