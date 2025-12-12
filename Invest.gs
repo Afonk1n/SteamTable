@@ -350,8 +350,9 @@ function invest_formatTable() {
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.PHASE), COLUMN_WIDTHS.WIDE) // P
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.POTENTIAL), COLUMN_WIDTHS.MEDIUM) // Q
   sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.TREND), COLUMN_WIDTHS.WIDE) // R - Тренд (объединенный формат: "🟨 Боковик 39 д.")
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.HERO_TREND), COLUMN_WIDTHS.MEDIUM) // S (перемещено из T, убрали DAYS_CHANGE)
-  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // T (перемещено из U)
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.HERO_TREND), COLUMN_WIDTHS.MEDIUM) // S
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // T
+  sheet.setColumnWidth(getColumnIndex(INVEST_COLUMNS.META_SIGNAL), COLUMN_WIDTHS.MEDIUM) // V
 
   if (lastRow > 1) {
     sheet.getRange(`D2:I${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY) // D-G, H (с комиссией), I (Профит)
@@ -532,6 +533,7 @@ function invest_calculateAllMetrics() {
   const salesTrends = []
   const volatilityIndices = []
   const heroTrends = []
+  const metaSignals = []
   const historyNames = historySheet ? historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues() : []
   
   // Рассчитываем метрики для всех строк
@@ -618,19 +620,25 @@ function invest_calculateAllMetrics() {
       
       // Hero Trend Score (только для Hero Items)
       let heroTrendValue = null
+      let metaSignalValue = null
       if (category === 'Hero Item' && heroId && rankCategory) {
         try {
           const latestStats = heroStats_getLatestStats(heroId, rankCategory)
           if (latestStats) {
             const heroStatsObj = {[rankCategory]: latestStats}
+            // Hero Trend (фундаментальная оценка)
             const heroTrendScore = analytics_calculateHeroTrendScore(heroId, rankCategory, heroStatsObj)
             heroTrendValue = analytics_formatScore(heroTrendScore)
+            // Мета сигнал (краткосрочный индикатор)
+            const metaSignalScore = analytics_calculateMetaSignal(heroId, rankCategory, heroStatsObj)
+            metaSignalValue = analytics_formatMetaSignal(metaSignalScore)
           }
         } catch (e) {
-          console.error(`Invest: ошибка расчета Hero Trend для "${itemName}":`, e)
+          console.error(`Invest: ошибка расчета Hero Trend/Мета сигнала для "${itemName}":`, e)
         }
       }
       heroTrends.push([heroTrendValue])
+      metaSignals.push([metaSignalValue])
       
     } catch (e) {
       console.error(`Invest: ошибка обработки строки ${i + 1} в calculateAllMetrics:`, e)
@@ -641,13 +649,15 @@ function invest_calculateAllMetrics() {
       salesTrends.push([null])
       volatilityIndices.push([null])
       heroTrends.push([null])
+      metaSignals.push([null])
     }
   }
   
-  // Batch-запись Hero Trend (метрики удалены из отображения, но расчеты остаются для Investment Score)
+  // Batch-запись Hero Trend и Мета сигнала
   const count = heroTrends.length
   if (count > 0) {
     sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.HERO_TREND), count, 1).setValues(heroTrends)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.META_SIGNAL), count, 1).setValues(metaSignals)
   }
   // Метрики (liquidityScores, demandRatios, priceMomenta, salesTrends, volatilityIndices) 
   // рассчитываются, но не записываются в таблицу - используются только для расчета Investment Score
@@ -757,7 +767,7 @@ function invest_updateInvestmentScores() {
       }
       
       // Рассчитываем Investment Score
-      let investmentScore = 0.5 // Значение по умолчанию
+      let investmentScore = 50 // Значение по умолчанию (0-100 шкала)
       try {
         investmentScore = analytics_calculateInvestmentScore(
           itemData,
@@ -767,14 +777,14 @@ function invest_updateInvestmentScores() {
           heroId,
           rankCategory
         )
-        // Валидация Investment Score
-        if (!Number.isFinite(investmentScore) || investmentScore < 0 || investmentScore > 1) {
+        // Валидация Investment Score (0-100 шкала)
+        if (!Number.isFinite(investmentScore) || investmentScore < 0 || investmentScore > 100) {
           console.warn(`Invest: некорректный Investment Score для "${itemName}": ${investmentScore}, используем значение по умолчанию`)
-          investmentScore = 0.5
+          investmentScore = 50
         }
       } catch (e) {
         console.error(`Invest: ошибка расчета Investment Score для "${itemName}":`, e)
-        investmentScore = 0.5
+        investmentScore = 50
       }
       
       investmentScores.push([analytics_formatScore(investmentScore)])
@@ -817,25 +827,22 @@ function invest_generateRecommendation(row) {
   const investmentScoreStr = String(sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.INVESTMENT_SCORE)).getValue() || '').trim()
   if (!investmentScoreStr || investmentScoreStr === '—') return '👀 НАБЛЮДАТЬ'
   
-  // Парсим число из формата "🟩 0.93"
+  // Парсим число из формата "🟩 85" (0-100 шкала)
   const scoreMatch = investmentScoreStr.match(/(\d+\.?\d*)/)
   if (!scoreMatch) return '👀 НАБЛЮДАТЬ'
   
   const investmentScore = parseFloat(scoreMatch[1])
   
-  const heroTrendStr = String(sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.HERO_TREND)).getValue() || '').trim()
-  const heroTrend = heroTrendStr !== '—' ? heroTrendStr : '—'
-  
-  if (investmentScore >= 0.75) {
-    return `🟩 КУПИТЬ (Score: ${(investmentScore * 100).toFixed(0)}%, Hero: ${heroTrend})`
+  if (investmentScore >= 75) {
+    return '🟩 КУПИТЬ'
   }
-  if (investmentScore >= 0.60) {
-    return `🟨 ДЕРЖАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+  if (investmentScore >= 60) {
+    return '🟨 ДЕРЖАТЬ'
   }
-  if (investmentScore < 0.40) {
-    return `🟥 ПРОДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+  if (investmentScore < 40) {
+    return '🟥 ПРОДАТЬ'
   }
-  return `👀 НАБЛЮДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+  return '👀 НАБЛЮДАТЬ'
 }
 
 

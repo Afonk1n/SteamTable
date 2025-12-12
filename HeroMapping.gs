@@ -36,8 +36,7 @@ function heroMapping_formatTable() {
   sheet.setColumnWidth(2, 100)  // B - Image
   sheet.setColumnWidth(3, 150)  // C - Hero Name
   sheet.setColumnWidth(4, 80)   // D - Hero ID
-  sheet.setColumnWidth(5, 100)  // E - Auto-detected
-  sheet.setColumnWidth(6, 120)  // F - Category (было G)
+  sheet.setColumnWidth(5, 120)  // E - Category
 
   if (lastRow > 1) {
     // Форматирование данных
@@ -58,17 +57,6 @@ function heroMapping_formatTable() {
     // Формат числа для Hero ID
     sheet.getRange(`${HERO_MAPPING_COLUMNS.HERO_ID}${DATA_START_ROW}:${HERO_MAPPING_COLUMNS.HERO_ID}${lastRow}`)
       .setNumberFormat(NUMBER_FORMATS.INTEGER)
-    
-    // Чекбоксы для Auto-detected (если еще не установлены)
-    const autoDetectedRange = sheet.getRange(`${HERO_MAPPING_COLUMNS.AUTO_DETECTED}${DATA_START_ROW}:${HERO_MAPPING_COLUMNS.AUTO_DETECTED}${lastRow}`)
-    
-    // Проверяем, установлены ли уже чекбоксы
-    try {
-      autoDetectedRange.insertCheckboxes()
-    } catch (e) {
-      // Чекбоксы уже установлены, игнорируем ошибку
-      console.log('HeroMapping: чекбоксы уже установлены')
-    }
   }
 
   sheet.setFrozenRows(HEADER_ROW)
@@ -97,7 +85,7 @@ function heroMapping_getHeroForItem(itemName) {
       const row = DATA_START_ROW + i
       const heroName = sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.HERO_NAME)).getValue()  // C
       const heroId = sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.HERO_ID)).getValue()      // D
-      const category = sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.CATEGORY)).getValue()   // G
+      const category = sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.CATEGORY)).getValue()   // E
       
       if (!heroName || String(heroName).trim().length === 0) {
         return null
@@ -129,9 +117,9 @@ function heroMapping_getAllMappings() {
   const count = lastRow - HEADER_ROW
   
   const itemNames = sheet.getRange(DATA_START_ROW, 1, count, 1).getValues()  // A - Item Name
-  const heroNames = sheet.getRange(DATA_START_ROW, 3, count, 1).getValues()  // C - Hero Name (было 2)
-  const heroIds = sheet.getRange(DATA_START_ROW, 4, count, 1).getValues()    // D - Hero ID (было 3)
-  const categories = sheet.getRange(DATA_START_ROW, 6, count, 1).getValues() // F - Category (было G/7)
+  const heroNames = sheet.getRange(DATA_START_ROW, 3, count, 1).getValues()  // C - Hero Name
+  const heroIds = sheet.getRange(DATA_START_ROW, 4, count, 1).getValues()    // D - Hero ID
+  const categories = sheet.getRange(DATA_START_ROW, 5, count, 1).getValues()  // E - Category
   
   for (let i = 0; i < count; i++) {
     const itemName = String(itemNames[i][0] || '').trim()
@@ -155,10 +143,9 @@ function heroMapping_getAllMappings() {
  * Обновляет или создает маппинг для предмета
  * @param {string} itemName - Название предмета
  * @param {string} heroName - Имя героя (null для удаления)
- * @param {boolean} autoDetected - Автоматически определено
  * @returns {number} Номер строки
  */
-function heroMapping_updateItem(itemName, heroName, autoDetected = false) {
+function heroMapping_updateItem(itemName, heroName) {
   const sheet = getOrCreateHeroMappingSheet_()
   const lastRow = sheet.getLastRow()
   
@@ -187,10 +174,6 @@ function heroMapping_updateItem(itemName, heroName, autoDetected = false) {
   // Обновляем данные
   if (heroName && heroName.trim().length > 0) {
     sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.HERO_NAME)).setValue(heroName.trim())
-    
-    // Пытаемся определить Hero ID (можно расширить позже)
-    // Пока оставляем пустым, можно заполнить вручную или через справочник
-    sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.AUTO_DETECTED)).setValue(autoDetected)
     sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.CATEGORY)).setValue('Hero Item')
   } else {
     // Если герой не указан - это общий предмет
@@ -211,7 +194,7 @@ function heroMapping_updateItem(itemName, heroName, autoDetected = false) {
  * @param {number} row - Номер строки
  */
 function heroMapping_formatNewRow_(sheet, row) {
-  sheet.getRange(row, 1, 1, 6)  // 6 колонок (убрали Verified)
+  sheet.getRange(row, 1, 1, 5)  // 5 колонок (убрали AUTO_DETECTED)
     .setVerticalAlignment('middle')
     .setHorizontalAlignment('center')
     .setWrap(false)
@@ -225,20 +208,12 @@ function heroMapping_formatNewRow_(sheet, row) {
   sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.HERO_ID))
     .setNumberFormat(NUMBER_FORMATS.INTEGER)
   
-  // Чекбоксы (безопасная установка)
-  try {
-    sheet.getRange(row, getColumnIndex(HERO_MAPPING_COLUMNS.AUTO_DETECTED)).insertCheckboxes()
-  } catch (e) {
-    // Чекбоксы уже установлены
-    console.log('HeroMapping: чекбоксы уже установлены для строки', row)
-  }
-  
   sheet.setRowHeight(row, ROW_HEIGHT)
 }
 
 /**
  * Обновляет или создает маппинги для нескольких предметов batch операцией
- * @param {Array<Object>} updates - Массив {itemName, heroName, autoDetected, imageUrl}
+ * @param {Array<Object>} updates - Массив {itemName, heroName, imageUrl, category}
  * @private
  */
 function heroMapping_updateItemsBatch_(updates) {
@@ -270,7 +245,8 @@ function heroMapping_updateItemsBatch_(updates) {
     
     const existingRow = existingItemsMap.get(itemName)
     const heroName = update.heroName ? String(update.heroName).trim() : ''
-    const category = heroName ? 'Hero Item' : 'Common Item'
+    // Используем category из update, если указан, иначе определяем по heroName
+    const category = update.category || (heroName ? 'Hero Item' : 'Common Item')
     const imageUrl = update.imageUrl || ''
     
     if (existingRow) {
@@ -282,8 +258,7 @@ function heroMapping_updateItemsBatch_(updates) {
           imageUrl,  // B - Image
           heroName,  // C - Hero Name
           null,  // D - Hero ID (пока оставляем пустым)
-          update.autoDetected || false,  // E - Auto-detected
-          category  // F - Category
+          category  // E - Category
         ]
       })
     } else {
@@ -295,8 +270,7 @@ function heroMapping_updateItemsBatch_(updates) {
           imageUrl,  // B - Image
           heroName,  // C - Hero Name
           null,  // D - Hero ID
-          update.autoDetected || false,  // E - Auto-detected
-          category  // F - Category (было G)
+          category  // E - Category
         ]
       })
     }
@@ -311,11 +285,9 @@ function heroMapping_updateItemsBatch_(updates) {
     // Записываем каждую колонку отдельно batch операцией
     const imageValues = []
     const heroNameValues = []
-    const autoDetectedValues = []
     const categoryValues = []
     const imageRows = []
     const heroNameRows = []
-    const autoDetectedRows = []
     const categoryRows = []
     
     updateRows.forEach(u => {
@@ -327,13 +299,9 @@ function heroMapping_updateItemsBatch_(updates) {
         heroNameRows.push(u.row)
         heroNameValues.push([u.values[2]])
       }
-      if (u.values[4] !== null) {  // Auto-detected
-        autoDetectedRows.push(u.row)
-        autoDetectedValues.push([u.values[4]])
-      }
-      if (u.values[5] !== null) {  // Category (теперь позиция 5, была 6)
+      if (u.values[4] !== null) {  // Category
         categoryRows.push(u.row)
-        categoryValues.push([u.values[5]])
+        categoryValues.push([u.values[4]])
       }
     })
     
@@ -356,9 +324,6 @@ function heroMapping_updateItemsBatch_(updates) {
     if (heroNameValues.length > 0) {
       sheet.getRange(heroNameRows[0], getColumnIndex(HERO_MAPPING_COLUMNS.HERO_NAME), heroNameValues.length, 1).setValues(heroNameValues)
     }
-    if (autoDetectedValues.length > 0) {
-      sheet.getRange(autoDetectedRows[0], getColumnIndex(HERO_MAPPING_COLUMNS.AUTO_DETECTED), autoDetectedValues.length, 1).setValues(autoDetectedValues)
-    }
     if (categoryValues.length > 0) {
       sheet.getRange(categoryRows[0], getColumnIndex(HERO_MAPPING_COLUMNS.CATEGORY), categoryValues.length, 1).setValues(categoryValues)
     }
@@ -370,7 +335,7 @@ function heroMapping_updateItemsBatch_(updates) {
     const values = newRows.map(r => r.values)
     
     // Записываем все новые строки за раз
-    sheet.getRange(startRow, 1, newRows.length, 6).setValues(values)  // 6 колонок (убрали Verified)
+    sheet.getRange(startRow, 1, newRows.length, 5).setValues(values)  // 5 колонок (убрали AUTO_DETECTED)
     
     // Добавляем формулы изображений для новых строк batch операцией
     const imageFormulas = newRows.map(r => {
@@ -495,8 +460,9 @@ function heroMapping_matchItemNames_(searchName, apiName) {
  * Обрабатывает все предметы из History с batch операциями и fallback на item_by_nameid
  * Улучшено для обработки проблемных предметов (The, таунты, специальные символы)
  * @param {boolean} silent - Если true, не показывает UI сообщения и диалоги (для автоматических вызовов)
+ * @param {boolean} autoSync - Если true, автоматически синхронизирует предметы из History перед определением героев
  */
-function heroMapping_autoDetectFromSteamWebAPI(silent = false) {
+function heroMapping_autoDetectFromSteamWebAPI(silent = false, autoSync = false) {
   console.log('HeroMapping: начало автоматического определения героев')
   
   const historySheet = getHistorySheet_()
@@ -546,8 +512,15 @@ function heroMapping_autoDetectFromSteamWebAPI(silent = false) {
     return
   }
   
-  // Диалог подтверждения (только если не silent режим)
-  if (!silent) {
+  // Автоматическая синхронизация предметов из History (если запрошено)
+  if (autoSync) {
+    console.log('HeroMapping: автоматическая синхронизация предметов из History...')
+    heroMapping_syncWithHistory(true) // silent = true
+    console.log('HeroMapping: предметы синхронизированы')
+  }
+  
+  // Диалог подтверждения (только если не silent режим и не autoSync)
+  if (!silent && !autoSync) {
     try {
       const ui = SpreadsheetApp.getUi()
       const confirmResponse = ui.alert(
@@ -611,14 +584,27 @@ function heroMapping_autoDetectFromSteamWebAPI(silent = false) {
       }
     }
     
-    // Если не нашли, добавляем в список не найденных
+    // Если не нашли, проверяем ручной маппинг для проблемных предметов
     if (!itemData) {
       notFoundItems.push(itemName)
-      // Добавляем без героя, чтобы предмет был в HeroMapping
+      
+      // Проверяем ручной маппинг для проблемных предметов
+      const manualMapping = PROBLEMATIC_ITEMS_MANUAL_MAPPING[itemName]
+      if (manualMapping) {
+        console.log(`HeroMapping: найден ручной маппинг для "${itemName}" -> ${manualMapping.heroName || 'Common Item'}`)
+        updates.push({
+          itemName: itemName,
+          heroName: manualMapping.heroName,
+          imageUrl: '',
+          category: manualMapping.category
+        })
+        return
+      }
+      
+      // Если нет ручного маппинга, добавляем без героя
       updates.push({
         itemName: itemName,
         heroName: null,
-        autoDetected: false,
         imageUrl: ''
       })
       return
@@ -632,7 +618,6 @@ function heroMapping_autoDetectFromSteamWebAPI(silent = false) {
     updates.push({
       itemName: itemName,
       heroName: heroName || null,
-      autoDetected: !!heroName,
       imageUrl: imageUrl
     })
   })
@@ -750,7 +735,6 @@ function heroMapping_syncWithHistory(silent = false) {
   const updates = newItems.map(itemName => ({
     itemName: itemName,
     heroName: null,
-    autoDetected: false,
     imageUrl: ''
   }))
   

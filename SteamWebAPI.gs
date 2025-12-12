@@ -104,9 +104,74 @@ function steamWebAPI_fetchSingleItem(itemName, game = 'dota2') {
 }
 
 /**
+ * Получает текущую цену предмета через Steam Market API (priceoverview endpoint)
+ * Fallback для предметов, которые не находятся через SteamWebAPI.ru
+ * @param {string} itemName - Название предмета (Market Hash Name)
+ * @param {number} appId - ID приложения Steam (570 для Dota 2)
+ * @param {number} currency - ID валюты (5 для рублей)
+ * @returns {Object} {ok: boolean, price?: number, lowestPrice?: number, medianPrice?: number, volume?: string, error?: string}
+ */
+function steamMarketAPI_fetchPrice(itemName, appId = 570, currency = 5) {
+  if (!itemName || itemName.trim().length === 0) {
+    return { ok: false, error: 'empty_name' }
+  }
+  
+  const url = `https://steamcommunity.com/market/priceoverview/?appid=${appId}&currency=${currency}&market_hash_name=${encodeURIComponent(itemName)}`
+  
+  const options = {
+    method: 'GET',
+    muteHttpExceptions: true
+  }
+  
+  try {
+    const response = UrlFetchApp.fetch(url, options)
+    const responseCode = response.getResponseCode()
+    const responseText = response.getContentText()
+    
+    if (responseCode !== 200) {
+      return { ok: false, error: 'http_error', details: `HTTP ${responseCode}` }
+    }
+    
+    const data = JSON.parse(responseText)
+    
+    if (!data.success) {
+      return { ok: false, error: 'api_error', details: data.message || 'API returned success=false' }
+    }
+    
+    // Парсим цены из формата "39,99 ₽" в число
+    let price = null
+    let lowestPrice = null
+    let medianPrice = null
+    
+    if (data.lowest_price) {
+      // Формат: "39,99 ₽" -> 39.99
+      const priceStr = data.lowest_price.replace(/[^\d,]/g, '').replace(',', '.')
+      lowestPrice = parseFloat(priceStr)
+      price = lowestPrice // Используем lowest_price как основную цену
+    }
+    
+    if (data.median_price) {
+      const priceStr = data.median_price.replace(/[^\d,]/g, '').replace(',', '.')
+      medianPrice = parseFloat(priceStr)
+    }
+    
+    return {
+      ok: true,
+      price: price,
+      lowestPrice: lowestPrice,
+      medianPrice: medianPrice,
+      volume: data.volume || null
+    }
+  } catch (e) {
+    console.error('SteamMarketAPI: ошибка получения цены:', e)
+    return { ok: false, error: 'parse_error', details: e.message }
+  }
+}
+
+/**
  * Унифицированный интерфейс для получения данных о предмете
  * Возвращает данные в формате совместимом с текущим кодом
- * Использует fallback на item_by_nameid если предмет не найден через основной endpoint
+ * Использует fallback на item_by_nameid и Steam Market API если предмет не найден через основной endpoint
  * @param {string} itemName - Название предмета (Market Hash Name)
  * @param {string} game - Игра ('dota2', 'cs2', 'rust', 'tf2')
  * @returns {Object} {ok: boolean, price?: number, data?: Object, error?: string}
@@ -126,14 +191,45 @@ function steamWebAPI_getItemData(itemName, game = 'dota2') {
     }
   }
   
-  // Если не нашли через основной endpoint, возвращаем ошибку
-  // Примечание: item_by_nameid требует nameid (число), а не name (строку), поэтому fallback не работает
-  // Для предметов, которые не найдены через основной endpoint, нужно либо найти их nameid вручную,
-  // либо использовать другой способ поиска
+  // Fallback 1: Пробуем через item_by_nameid с поиском по названию
+  const fallbackResult = steamWebAPI_fetchItemByNameIdViaName(itemName, game)
+  if (fallbackResult.ok && fallbackResult.item) {
+    const item = fallbackResult.item
+    const price = item.pricelatest || item.price || null
+    
+    return {
+      ok: true,
+      price: price,
+      data: item,
+      source: 'item_by_nameid'
+    }
+  }
+  
+  // Fallback 2: Пробуем через Steam Market API (только для получения цены)
+  const appId = game === 'dota2' ? 570 : (game === 'cs2' ? 730 : 440) // Dota 2, CS2, TF2
+  const marketResult = steamMarketAPI_fetchPrice(itemName, appId, 5) // currency 5 = рубли
+  if (marketResult.ok && marketResult.price) {
+    // Возвращаем минимальные данные (только цену, без полных данных)
+    return {
+      ok: true,
+      price: marketResult.price,
+      data: {
+        marketname: itemName,
+        pricelatest: marketResult.price,
+        price: marketResult.price,
+        lowestPrice: marketResult.lowestPrice,
+        medianPrice: marketResult.medianPrice,
+        volume: marketResult.volume
+      },
+      source: 'steam_market_api'
+    }
+  }
+  
+  // Если все fallback не сработали, возвращаем ошибку
   return {
     ok: false,
     error: result.error || 'item_not_found',
-    details: result.details || 'Item not found via main endpoint'
+    details: 'Item not found via main endpoint, item_by_nameid, or Steam Market API'
   }
 }
 
@@ -682,6 +778,103 @@ function priceHistory_updateMinMaxInHistory(itemName, minPrice, maxPrice) {
 }
 
 /**
+ * Инициализирует цену для предмета: заполняет текущую цену и создает первый столбец с датой/периодом
+ * Используется при первом расчете Min/Max для новых предметов
+ * @param {string} itemName - Название предмета
+ * @param {number} price - Текущая цена
+ * @returns {boolean} true если инициализировано успешно
+ */
+function priceHistory_initializePriceForItem_(itemName, price) {
+  const historySheet = getHistorySheet_()
+  if (!historySheet) {
+    return false
+  }
+  
+  const lastRow = historySheet.getLastRow()
+  if (lastRow < DATA_START_ROW) {
+    return false
+  }
+  
+  // Валидация цены
+  const validation = validatePrice_(price, itemName)
+  if (!validation.valid) {
+    console.warn(`PriceHistory: цена не прошла валидацию для "${itemName}": ${validation.error}`)
+    return false
+  }
+  
+  const validatedPrice = validation.price
+  
+  // Ищем строку с предметом
+  const names = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
+  let itemRow = -1
+  
+  for (let i = 0; i < names.length; i++) {
+    const rowName = String(names[i][0] || '').trim()
+    if (rowName === itemName) {
+      itemRow = DATA_START_ROW + i
+      break
+    }
+  }
+  
+  if (itemRow === -1) {
+    return false
+  }
+  
+  // Получаем текущий период один раз
+  const period = getCurrentPricePeriod()
+  
+  // Проверяем, есть ли уже цены в колонках дат
+  const lastCol = historySheet.getLastColumn()
+  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
+  const hasExistingPrices = lastCol >= firstDateCol
+  
+  // Получаем или создаем колонку для текущего периода
+  let periodCol
+  try {
+    periodCol = history_ensurePeriodColumn(period)
+  } catch (e) {
+    console.warn(`PriceHistory: ошибка получения колонки периода для "${itemName}":`, e)
+    return false
+  }
+  
+  if (periodCol) {
+    if (hasExistingPrices) {
+      // Проверяем, есть ли уже цена в текущем периоде
+      const existingPrice = historySheet.getRange(itemRow, periodCol).getValue()
+      // Если цена уже есть - не перезаписываем
+      if (existingPrice && typeof existingPrice === 'number' && existingPrice > 0) {
+        console.log(`PriceHistory: цена для "${itemName}" уже существует в периоде ${period}, не перезаписываем`)
+        return true
+      }
+    }
+    
+    // Записываем цену в текущий период (новую или существующую колонку)
+    historySheet.getRange(itemRow, periodCol).setValue(validatedPrice)
+    console.log(`PriceHistory: записана цена для "${itemName}" в колонку ${periodCol} (период: ${period}): ${validatedPrice}`)
+  }
+  
+  // Обновляем текущую цену (колонка D)
+  const currentPriceCol = getColumnIndex(HISTORY_COLUMNS.CURRENT_PRICE)
+  const currentPriceValue = historySheet.getRange(itemRow, currentPriceCol).getValue()
+  
+  // Заполняем текущую цену только если она пустая
+  // ВАЖНО: Проверяем не только null, но и пустую строку, и 0
+  const isEmpty = currentPriceValue === null || 
+                  currentPriceValue === '' || 
+                  currentPriceValue === 0 ||
+                  (typeof currentPriceValue === 'number' && (isNaN(currentPriceValue) || currentPriceValue <= 0))
+  
+  if (isEmpty) {
+    historySheet.getRange(itemRow, currentPriceCol).setValue(validatedPrice)
+    console.log(`PriceHistory: записана текущая цена для "${itemName}" в строку ${itemRow}, колонку ${currentPriceCol}: ${validatedPrice}`)
+  } else {
+    console.log(`PriceHistory: текущая цена для "${itemName}" уже заполнена (${currentPriceValue}), не перезаписываем`)
+  }
+  
+  return true
+}
+
+/**
  * Проверяет, есть ли уже Min/Max у предмета в History
  * @param {string} itemName - Название предмета
  * @returns {Object} {hasMin: boolean, hasMax: boolean, minValue: number|null, maxValue: number|null}
@@ -934,8 +1127,64 @@ function priceHistory_calculateMinMaxForAllItems(onlyMissing = false) {
           }
           
           if (!itemData) {
+            // Fallback 1: Пробуем через Steam Market API для получения текущей цены
+            console.log(`PriceHistory: предмет "${itemName}" не найден через SteamWebAPI, пробуем Steam Market API...`)
+            const marketResult = steamMarketAPI_fetchPrice(itemName, STEAM_APP_ID, 5) // currency 5 = рубли
+            
+            if (marketResult.ok && marketResult.price) {
+              // Получили цену через Steam Market API - используем её как текущую цену
+              // Min/Max будем рассчитывать из исторических данных или использовать текущую цену как начальную
+              console.log(`PriceHistory: получена цена через Steam Market API для "${itemName}": ${marketResult.price}`)
+              
+              // Инициализируем цену (заполняем текущую цену и создаем первый столбец)
+              priceHistory_initializePriceForItem_(itemName, marketResult.price)
+              
+              // Для Min/Max пробуем из исторических данных, если есть
+              const historyDataResult = priceHistory_calculateMinMaxFromHistoryData(itemName)
+              if (historyDataResult.ok && historyDataResult.min && historyDataResult.max) {
+                const updated = priceHistory_updateMinMaxInHistory(itemName, historyDataResult.min, historyDataResult.max)
+                if (updated) {
+                  successCount++
+                  console.log(`PriceHistory: Min/Max для "${itemName}" рассчитаны из исторических данных (Min: ${historyDataResult.min}, Max: ${historyDataResult.max})`)
+                  return
+                }
+              } else {
+                // Если нет исторических данных, используем текущую цену как начальную Min/Max
+                const initialPrice = marketResult.price
+                const updated = priceHistory_updateMinMaxInHistory(itemName, initialPrice, initialPrice)
+                if (updated) {
+                  successCount++
+                  console.log(`PriceHistory: Min/Max для "${itemName}" установлены из текущей цены (Min: ${initialPrice}, Max: ${initialPrice})`)
+                  return
+                }
+              }
+            }
+            
+            // Fallback 2: Для проблемных предметов пробуем рассчитать Min/Max из исторических данных
+            const isProblematicItem = PROBLEMATIC_ITEMS_MANUAL_MAPPING.hasOwnProperty(itemName)
+            if (isProblematicItem) {
+              console.log(`PriceHistory: предмет "${itemName}" в списке проблемных, пробуем рассчитать Min/Max из исторических данных`)
+              const historyDataResult = priceHistory_calculateMinMaxFromHistoryData(itemName)
+              
+              if (historyDataResult.ok && historyDataResult.min && historyDataResult.max) {
+                // Обновляем Min/Max в History из исторических данных
+                const updated = priceHistory_updateMinMaxInHistory(itemName, historyDataResult.min, historyDataResult.max)
+                if (updated) {
+                  successCount++
+                  console.log(`PriceHistory: Min/Max для "${itemName}" рассчитаны из исторических данных (Min: ${historyDataResult.min}, Max: ${historyDataResult.max})`)
+                  return
+                } else {
+                  errorCount++
+                  console.warn(`PriceHistory: не удалось обновить Min/Max для "${itemName}" в History`)
+                  return
+                }
+              } else {
+                console.warn(`PriceHistory: не удалось рассчитать Min/Max из исторических данных для "${itemName}": ${historyDataResult.error || 'unknown'}`)
+              }
+            }
+            
             errorCount++
-            console.warn(`PriceHistory: предмет "${itemName}" не найден ни через основной endpoint, ни через item_by_nameid`)
+            console.warn(`PriceHistory: предмет "${itemName}" не найден ни через основной endpoint, ни через item_by_nameid, ни через Steam Market API${isProblematicItem ? ', ни через исторические данные' : ''}`)
             return
           }
           
@@ -966,6 +1215,26 @@ function priceHistory_calculateMinMaxForAllItems(onlyMissing = false) {
             successCount++
             processedCount++
             console.log(`PriceHistory: обновлено Min/Max для "${itemName}": Min=${minPrice}, Max=${maxPrice}`)
+            
+            // ИНИЦИАЛИЗАЦИЯ ЦЕН: Если есть текущая цена (pricelatest), заполняем её и инициализируем первый столбец
+            // Пробуем несколько полей для получения текущей цены
+            const currentPrice = itemData.pricelatest || itemData.price || itemData.pricemedian || itemData.priceavg24h || null
+            
+            if (currentPrice && Number.isFinite(Number(currentPrice)) && Number(currentPrice) > 0) {
+              try {
+                const initialized = priceHistory_initializePriceForItem_(itemName, Number(currentPrice))
+                if (initialized) {
+                  console.log(`PriceHistory: инициализирована цена для "${itemName}": ${Number(currentPrice)}`)
+                } else {
+                  console.warn(`PriceHistory: не удалось инициализировать цену для "${itemName}" (функция вернула false)`)
+                }
+              } catch (e) {
+                console.error(`PriceHistory: ошибка инициализации цены для "${itemName}":`, e)
+              }
+            } else {
+              // Логируем, почему не инициализировали цену
+              console.warn(`PriceHistory: для "${itemName}" нет текущей цены в API данных. pricelatest=${itemData.pricelatest}, price=${itemData.price}, pricemedian=${itemData.pricemedian}, priceavg24h=${itemData.priceavg24h}`)
+            }
           } else {
             errorCount++
             console.warn(`PriceHistory: не найдена строка для "${itemName}" в History`)
@@ -1016,7 +1285,79 @@ function priceHistory_calculateMinMaxForMissingItems() {
 }
 
 /**
+ * Рассчитывает Min/Max для одного предмета из исторических данных в History (колонки дат)
+ * Используется как fallback для предметов, у которых нет Min/Max из SteamWebAPI
+ * @param {string} itemName - Название предмета
+ * @returns {Object} {ok: boolean, min?: number, max?: number, error?: string}
+ */
+function priceHistory_calculateMinMaxFromHistoryData(itemName) {
+  const name = String(itemName || '').trim()
+  if (!name) {
+    return { ok: false, error: 'empty_name' }
+  }
+  
+  const historySheet = getHistorySheet_()
+  if (!historySheet) {
+    return { ok: false, error: 'history_sheet_not_found' }
+  }
+  
+  const lastRow = historySheet.getLastRow()
+  if (lastRow < DATA_START_ROW) {
+    return { ok: false, error: 'no_items_in_history' }
+  }
+  
+  // Ищем строку с предметом
+  const names = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
+  let itemRow = -1
+  
+  for (let i = 0; i < names.length; i++) {
+    const rowName = String(names[i][0] || '').trim()
+    if (rowName === name) {
+      itemRow = DATA_START_ROW + i
+      break
+    }
+  }
+  
+  if (itemRow === -1) {
+    return { ok: false, error: 'item_not_found_in_history' }
+  }
+  
+  // Получаем все цены из колонок дат для этого предмета
+  const priceHistory = history_getPriceHistoryForItem_(historySheet, itemRow)
+  
+  if (!priceHistory.prices || priceHistory.prices.length === 0) {
+    return { ok: false, error: 'no_price_data_in_history' }
+  }
+  
+  // Рассчитываем Min/Max из исторических цен
+  let min = Infinity
+  let max = -Infinity
+  
+  priceHistory.prices.forEach(price => {
+    if (typeof price === 'number' && !isNaN(price) && price > 0) {
+      if (price < min) {
+        min = price
+      }
+      if (price > max) {
+        max = price
+      }
+    }
+  })
+  
+  if (min === Infinity || max === -Infinity) {
+    return { ok: false, error: 'no_valid_prices' }
+  }
+  
+  return {
+    ok: true,
+    min: min,
+    max: max
+  }
+}
+
+/**
  * Рассчитывает Min/Max для одного предмета (вспомогательная функция)
+ * Пробует сначала через SteamWebAPI, затем через исторические данные в History
  * @param {string} itemName - Название предмета
  * @returns {Object} {ok: boolean, min?: number, max?: number, error?: string}
  */
@@ -1026,30 +1367,55 @@ function priceHistory_calculateMinMaxForSingleItem(itemName) {
     return { ok: false, error: 'empty_name' }
   }
   
+  // Пробуем сначала через SteamWebAPI
+  const itemData = steamWebAPI_getItemData(name, 'dota2')
+  if (itemData.ok && itemData.data) {
+    const minPrice = itemData.data.pricemin || null
+    const maxPrice = itemData.data.pricemax || null
+    
+    if (minPrice && maxPrice && Number.isFinite(minPrice) && Number.isFinite(maxPrice) && minPrice > 0 && maxPrice > 0) {
+      return {
+        ok: true,
+        min: minPrice,
+        max: maxPrice,
+        source: 'steamwebapi'
+      }
+    }
+  }
+  
+  // Fallback: пробуем через pricehistory endpoint
   const historyResult = priceHistory_fetchHistoryForItem(name, STEAM_APP_ID)
   
-  if (!historyResult.ok || !historyResult.prices) {
-    return { ok: false, error: historyResult.error || 'fetch_failed' }
+  if (historyResult.ok && historyResult.prices) {
+    const parsedHistory = priceHistory_parseHistoryData(historyResult.prices)
+    
+    if (parsedHistory.length > 0) {
+      const minMax = priceHistory_calculateMinMax(parsedHistory)
+      
+      if (minMax.min && minMax.max) {
+        return {
+          ok: true,
+          min: minMax.min,
+          max: minMax.max,
+          minDate: minMax.minDate,
+          maxDate: minMax.maxDate,
+          source: 'pricehistory'
+        }
+      }
+    }
   }
   
-  const parsedHistory = priceHistory_parseHistoryData(historyResult.prices)
-  
-  if (parsedHistory.length === 0) {
-    return { ok: false, error: 'no_valid_data' }
+  // Fallback 2: пробуем из исторических данных в History
+  const historyDataResult = priceHistory_calculateMinMaxFromHistoryData(name)
+  if (historyDataResult.ok) {
+    return {
+      ok: true,
+      min: historyDataResult.min,
+      max: historyDataResult.max,
+      source: 'history_data'
+    }
   }
   
-  const minMax = priceHistory_calculateMinMax(parsedHistory)
-  
-  if (!minMax.min || !minMax.max) {
-    return { ok: false, error: 'calculation_failed' }
-  }
-  
-  return {
-    ok: true,
-    min: minMax.min,
-    max: minMax.max,
-    minDate: minMax.minDate,
-    maxDate: minMax.maxDate
-  }
+  return { ok: false, error: 'all_methods_failed' }
 }
 

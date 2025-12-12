@@ -191,36 +191,34 @@ function analytics_calculateHeroTrendScore(heroId, rankCategory, heroStats) {
     return 0.5
   }
   
-  const contestRateChange7d = stats.contestRateChange7d || 0
+  // Новые данные (Immortal только, убраны фейки)
   const proContestRateChange7d = stats.proContestRateChange7d || 0
-  const pickRate = stats.pickRate || 0
-  const banRate = stats.banRate || 0
+  const pickRateChange7d = stats.pickRateChange7d || 0  // Immortal за неделю
+  const pickRatePercent = stats.pickRatePercent || 0  // Текущий пикрейт Immortal
   const winRate = stats.winRate || 0
   
   // Формула с весами из ANALYTICS_WEIGHTS
   const weights = ANALYTICS_WEIGHTS.HERO_TREND_SCORE
   
   // Нормализация компонентов
-  const contestRateChangeNorm = analytics_normalizeToRange(contestRateChange7d, -0.3, 0.3, 0, 1)
   const proContestRateChangeNorm = analytics_normalizeToRange(proContestRateChange7d, -0.3, 0.3, 0, 1)
-  const pickRateNorm = analytics_normalizeToRange((pickRate - 50) / 50, -1, 1, 0, 1)
-  const banRateNorm = Math.min(banRate / 100, 1)
+  const pickRateChange7dNorm = analytics_normalizeToRange(pickRateChange7d, -0.3, 0.3, 0, 1)
+  const pickRateNorm = analytics_normalizeToRange((pickRatePercent - 50) / 50, -1, 1, 0, 1)
   const winRateNorm = analytics_normalizeToRange((winRate - 50) / 50, -1, 1, 0, 1)
   
-  // Если про-статистика недоступна, перераспределяем вес на contestRateChange
-  let contestRateWeight = weights.CONTEST_RATE_CHANGE
-  let proContestRateWeight = weights.PRO_CONTEST_RATE_CHANGE
+  // Если про-статистика недоступна, перераспределяем вес на pickRateChange7d
+  let proContestRateWeight = weights.PRO_CONTEST_RATE_CHANGE_7D
+  let pickRateChangeWeight = weights.PICK_RATE_CHANGE_IMMORTAL_7D
   
   if (!proContestRateChange7d || proContestRateChange7d === 0) {
-    contestRateWeight = weights.CONTEST_RATE_CHANGE + weights.PRO_CONTEST_RATE_CHANGE
+    pickRateChangeWeight = weights.PICK_RATE_CHANGE_IMMORTAL_7D + weights.PRO_CONTEST_RATE_CHANGE_7D
     proContestRateWeight = 0
   }
   
   const score = 
-    (contestRateChangeNorm * contestRateWeight) +
     (proContestRateChangeNorm * proContestRateWeight) +
-    (pickRateNorm * weights.PICK_RATE) +
-    (banRateNorm * weights.BAN_RATE) +
+    (pickRateChange7dNorm * pickRateChangeWeight) +
+    (pickRateNorm * weights.PICK_RATE_IMMORTAL) +
     (winRateNorm * weights.WIN_RATE)
   
   return Math.min(1, Math.max(0, score))
@@ -234,10 +232,10 @@ function analytics_calculateHeroTrendScore(heroId, rankCategory, heroStats) {
  * @param {string} itemCategory - Категория предмета ('Hero Item' или 'Common Item')
  * @param {number} heroId - ID героя (опционально)
  * @param {string} rankCategory - Категория ранга (опционально)
- * @returns {number} Score от 0 до 1
+ * @returns {number} Score от 0 до 100
  */
 function analytics_calculateInvestmentScore(itemData, heroStats, historyData, itemCategory, heroId, rankCategory) {
-  if (!itemData) return 0.5
+  if (!itemData) return 50
   
   const weights = ANALYTICS_WEIGHTS.INVESTMENT_SCORE
   
@@ -277,16 +275,17 @@ function analytics_calculateInvestmentScore(itemData, heroStats, historyData, it
       finalScore = Math.min(1.0, finalScore * 1.15)
     }
     
-    return Math.min(1, Math.max(0, finalScore))
+    return Math.round(Math.min(100, Math.max(0, finalScore * 100)))
   } else {
     // Формула для Common Items (перераспределенные веса)
-    return Math.min(1, Math.max(0,
+    const score = Math.min(1, Math.max(0,
       (volatilityIndex * 0.30) +
       (demandRatio * 0.25) +
       (priceMomentum * 0.20) +
       (salesTrend * 0.15) +
       (liquidityScore * 0.10)
     ))
+    return Math.round(score * 100)
   }
 }
 
@@ -299,10 +298,10 @@ function analytics_calculateInvestmentScore(itemData, heroStats, historyData, it
  * @param {number} currentPrice - Текущая цена
  * @param {number} heroId - ID героя (опционально)
  * @param {string} rankCategory - Категория ранга (опционально)
- * @returns {number} Score от 0 до 1
+ * @returns {number} Score от 0 до 100
  */
 function analytics_calculateBuybackScore(itemData, heroStats, historyData, sellPrice, currentPrice, heroId, rankCategory) {
-  if (!itemData || !sellPrice || !currentPrice) return 0.5
+  if (!itemData || !sellPrice || !currentPrice) return 50
   
   const weights = ANALYTICS_WEIGHTS.BUYBACK_SCORE
   
@@ -333,20 +332,20 @@ function analytics_calculateBuybackScore(itemData, heroStats, historyData, sellP
     (priceMomentum * weights.PRICE_MOMENTUM) +
     (liquidityScore * weights.LIQUIDITY)
   
-  return Math.min(1, Math.max(0, score))
+  return Math.round(Math.min(100, Math.max(0, score * 100)))
 }
 
 /**
  * Расчет Risk Level (уровень риска)
- * @param {number} investmentScore - Investment Score или Buyback Score
- * @param {number} volatilityIndex - Volatility Index
- * @param {number} demandRatio - Demand Ratio
+ * @param {number} investmentScore - Investment Score или Buyback Score (0-100)
+ * @param {number} volatilityIndex - Volatility Index (0-1)
+ * @param {number} demandRatio - Demand Ratio (0-1)
  * @returns {string} 'Низкий', 'Средний', 'Высокий'
  */
 function analytics_calculateRiskLevel(investmentScore, volatilityIndex, demandRatio) {
-  if (investmentScore >= 0.7 && volatilityIndex < 0.5 && demandRatio > 0.6) {
+  if (investmentScore >= 70 && volatilityIndex < 0.5 && demandRatio > 0.6) {
     return 'Низкий'
-  } else if (investmentScore >= 0.5 && volatilityIndex < 0.7 && demandRatio > 0.4) {
+  } else if (investmentScore >= 50 && volatilityIndex < 0.7 && demandRatio > 0.4) {
     return 'Средний'
   } else {
     return 'Высокий'
@@ -387,16 +386,90 @@ function analytics_normalizeToRange(value, min, max, targetMin = 0, targetMax = 
 }
 
 /**
- * Форматирование скора для отображения (🟢 0.93)
+ * Форматирование скора для отображения (🟢 85)
  * Использует круглые эмодзи для единообразия
- * @param {number} score - Score от 0 до 1
+ * Поддерживает оба формата: 0-1 (автоматически умножает на 100) и 0-100
+ * @param {number} score - Score от 0 до 1 или от 0 до 100
  * @returns {string} Отформатированная строка
  */
 function analytics_formatScore(score) {
   if (typeof score !== 'number' || isNaN(score)) return '—'
   
-  // Круглые эмодзи: 🟢 (>=0.75), 🟡 (>=0.60), ⚪ (>=0.40), 🔴 (<0.40)
-  const emoji = score >= 0.75 ? '🟢' : score >= 0.60 ? '🟡' : score >= 0.40 ? '⚪' : '🔴'
-  return `${emoji} ${score.toFixed(2)}`
+  // Автоматическое определение формата: если значение < 1, умножаем на 100
+  const normalizedScore = score < 1 ? Math.round(score * 100) : Math.round(score)
+  
+  // Круглые эмодзи: 🟢 (>=75), 🟡 (>=60), ⚪ (>=40), 🔴 (<40)
+  const emoji = normalizedScore >= 75 ? '🟢' : normalizedScore >= 60 ? '🟡' : normalizedScore >= 40 ? '⚪' : '🔴'
+  return `${emoji} ${normalizedScore}`
+}
+
+/**
+ * Расчет Мета сигнала (краткосрочный индикатор для патч-имб)
+ * Фокус на краткосрочных изменениях (24h)
+ * @param {number} heroId - ID героя
+ * @param {string} rankCategory - Категория ранга ('High Rank' или 'All Ranks')
+ * @param {Object} heroStats - Данные статистики героя из HeroStats
+ * @returns {number} Score от 0 до 100
+ */
+function analytics_calculateMetaSignal(heroId, rankCategory, heroStats) {
+  if (!heroId || !heroStats) return 0
+  
+  // Получаем последние данные статистики
+  const latestStats = heroStats_getLatestStats(heroId, rankCategory)
+  if (!latestStats) return 0
+  
+  // Парсим JSON данные
+  let stats
+  try {
+    stats = typeof latestStats === 'string' ? JSON.parse(latestStats) : latestStats
+  } catch (e) {
+    return 0
+  }
+  
+  // Данные для Мета сигнала (краткосрочные изменения)
+  const pickRateChange24h = stats.pickRateChange24h || 0  // Главный индикатор патч-имб
+  const proContestRateChange7d = stats.proContestRateChange7d || 0  // Про-мета
+  const pickRateChange7d = stats.pickRateChange7d || 0  // Недельный тренд Immortal
+  
+  // Формула с весами из ANALYTICS_WEIGHTS
+  const weights = ANALYTICS_WEIGHTS.META_SIGNAL
+  
+  // Нормализация компонентов (24h изменения могут быть более резкими)
+  const pickRateChange24hNorm = analytics_normalizeToRange(pickRateChange24h, -0.5, 0.5, 0, 1)
+  const proContestRateChangeNorm = analytics_normalizeToRange(proContestRateChange7d, -0.3, 0.3, 0, 1)
+  const pickRateChange7dNorm = analytics_normalizeToRange(pickRateChange7d, -0.3, 0.3, 0, 1)
+  
+  // Если 24h данные недоступны, перераспределяем вес на 7d
+  let pickRateChange24hWeight = weights.PICK_RATE_CHANGE_IMMORTAL_24H
+  let pickRateChange7dWeight = weights.PICK_RATE_CHANGE_IMMORTAL_7D
+  
+  if (!pickRateChange24h || pickRateChange24h === 0) {
+    pickRateChange7dWeight = weights.PICK_RATE_CHANGE_IMMORTAL_7D + weights.PICK_RATE_CHANGE_IMMORTAL_24H
+    pickRateChange24hWeight = 0
+  }
+  
+  const score = 
+    (pickRateChange24hNorm * pickRateChange24hWeight) +
+    (proContestRateChangeNorm * weights.PRO_CONTEST_RATE_CHANGE_7D) +
+    (pickRateChange7dNorm * pickRateChange7dWeight)
+  
+  // Возвращаем в диапазоне 0-100
+  return Math.round(Math.min(100, Math.max(0, score * 100)))
+}
+
+/**
+ * Форматирование Мета сигнала для отображения (🔥 92)
+ * Использует специальные эмодзи для краткосрочных сигналов
+ * @param {number} score - Score от 0 до 100
+ * @returns {string} Отформатированная строка
+ */
+function analytics_formatMetaSignal(score) {
+  if (typeof score !== 'number' || isNaN(score)) return '—'
+  
+  const normalizedScore = Math.round(score)
+  
+  // Специальные эмодзи для Мета сигнала: 🔥 (>=75), 🟡 (>=60), ⚪ (>=40), 🔴 (<40)
+  const emoji = normalizedScore >= 75 ? '🔥' : normalizedScore >= 60 ? '🟡' : normalizedScore >= 40 ? '⚪' : '🔴'
+  return `${emoji} ${normalizedScore}`
 }
 

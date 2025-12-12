@@ -224,9 +224,10 @@ const INVEST_COLUMNS = {
   PHASE: 'P',  // Перемещено из O
   POTENTIAL: 'Q',  // Перемещено из P
   TREND: 'R',  // Объединенный формат: "🟨 Боковик 39 д." (объединены Тренд и Дней смены)
-  HERO_TREND: 'S',  // НОВАЯ: Hero Trend (перемещено из T, убрали DAYS_CHANGE)
-  RISK_LEVEL: 'T',  // НОВАЯ: Risk Level (перемещено из U, метрики удалены из отображения, но остаются в коде для расчетов)
-  SELL_CHECKBOX: 'U'  // НОВАЯ: Продать (перемещено из V, убрали BUY_CHECKBOX и метрики)
+  HERO_TREND: 'S',  // Hero Trend (фундаментальная оценка)
+  RISK_LEVEL: 'T',  // Risk Level (уровень риска)
+  SELL_CHECKBOX: 'U',  // Продать (чекбокс)
+  META_SIGNAL: 'V'  // Мета сигнал - краткосрочный индикатор (0-100)
 }
 
 // Идентификаторы колонок для Sales
@@ -241,10 +242,14 @@ const SALES_COLUMNS = {
   LINK: 'G',  // Было H, стало G
   MIN_PRICE: 'H',  // Было I, стало H
   MAX_PRICE: 'I',  // Было J, стало I
-  BUYBACK_SCORE: 'J',  // Было K, стало J
-  RECOMMENDATION: 'K',  // Было L, стало K
-  HERO_TREND: 'L',  // Было M, стало L
-  RISK_LEVEL: 'M'  // Было N, стало M
+  BUYBACK_SCORE: 'J',  // Buyback Score
+  RECOMMENDATION: 'K',  // Рекомендация
+  HERO_TREND: 'L',  // Hero Trend (фундаментальная оценка)
+  RISK_LEVEL: 'M',  // Risk Level (уровень риска)
+  PRO_CONTEST_RATE_CURRENT: 'N',  // Pro Contest Rate (current)
+  PRO_CONTEST_RATE_CHANGE_7D: 'O',  // Pro Contest Rate Change (7d)
+  PICK_RATE_CHANGE_IMMORTAL_24H: 'P',  // Pick Rate Change Immortal (24h)
+  META_SIGNAL: 'Q'  // Мета сигнал - краткосрочный индикатор (0-100)
 }
 
 // Идентификаторы колонок для History
@@ -264,14 +269,17 @@ const HISTORY_COLUMNS = {
   PHASE: 'K',  // Перемещено из J
   POTENTIAL: 'L',  // Перемещено из K
   TREND: 'M',  // Перемещено из I, объединенный формат: "🟥 Падает 35 дн." (объединены Тренд и Дней смены)
-  HERO_TREND: 'N',  // НОВАЯ: Hero Trend (перемещено из O, убрали DAYS_CHANGE)
-  CONTEST_RATE_CHANGE_7D: 'O',  // НОВАЯ: Contest Rate Change (7d) (перемещено из P)
-  CONTEST_RATE_CURRENT: 'P',  // НОВАЯ: Contest Rate (current) (перемещено из Q)
-  PICK_RATE_CURRENT: 'Q',  // НОВАЯ: Pick Rate (current) (перемещено из R)
-  WIN_RATE_CURRENT: 'R',  // НОВАЯ: Win Rate (current) (перемещено из S)
-  HERO_NAME: 'S',  // НОВАЯ: Hero Name (перемещено из T)
-  // Даты начинаются с T (колонка 20, было 21)
-  FIRST_DATE_COL: 20
+  HERO_TREND: 'N',  // Hero Trend (фундаментальная оценка)
+  PRO_CONTEST_RATE_CURRENT: 'O',  // Pro Contest Rate (current) - контест-рейт про-сцены
+  PRO_CONTEST_RATE_CHANGE_7D: 'P',  // Pro Contest Rate Change (7d) - прирост про-контест-рейта за неделю
+  PICK_RATE_CHANGE_IMMORTAL_7D: 'Q',  // Pick Rate Change Immortal (7d) - прирост пикрейта Immortal за неделю
+  PICK_RATE_CHANGE_IMMORTAL_24H: 'R',  // Pick Rate Change Immortal (24h) - прирост пикрейта Immortal за 24ч
+  PICK_RATE_IMMORTAL: 'S',  // Pick Rate (Immortal) - текущий пикрейт Immortal
+  WIN_RATE_CURRENT: 'T',  // Win Rate (current) - текущий винрейт
+  HERO_NAME: 'U',  // Hero Name - имя героя
+  META_SIGNAL: 'V',  // Мета сигнал - краткосрочный индикатор (0-100)
+  // Даты начинаются с W (колонка 23, было 20)
+  FIRST_DATE_COL: 23
 }
 
 // Заголовки по умолчанию
@@ -297,7 +305,8 @@ const HEADERS = {
     'Тренд',  // Объединенный формат: "🟨 Боковик 39 д."
     'Тренд героя',
     'Уровень риска',
-    'Продать'
+    'Продать',
+    'Мета сигнал'
   ],
   
   SALES: [
@@ -313,7 +322,11 @@ const HEADERS = {
     'Оценка откупа',
     'Рекомендация',
     'Тренд героя',
-    'Уровень риска'
+    'Уровень риска',
+    'Контест-рейт про-сцены',
+    'Изменение контест-рейта про (7д)',
+    'Изменение пик-рейта Иммортал (24ч)',
+    'Мета сигнал'
   ],
   
   HISTORY: [
@@ -331,11 +344,14 @@ const HEADERS = {
     'Потенциал (P85)',
     'Тренд',  // Объединенный формат: "🟨 Боковик 39 д."
     'Тренд героя',
-    'Изменение контест-рейта (7д)',
-    'Контест-рейт (текущий)',
-    'Пик-рейт (текущий)',
-    'Винрейт (текущий)',
-    'Имя героя'
+    'Контест-рейт про-сцены',
+    'Изменение контест-рейта про (7д)',
+    'Изменение пик-рейта Иммортал (7д)',
+    'Изменение пик-рейта Иммортал (24ч)',
+    'Пик-рейт Иммортал',
+    'Винрейт',
+    'Имя героя',
+    'Мета сигнал'
     // Даты добавляются динамически с колонки U (21)
   ],
   
@@ -351,7 +367,6 @@ const HEADERS = {
     'Image',
     'Hero Name',
     'Hero ID',
-    'Auto-detected',
     'Category'
   ]
 }
@@ -375,21 +390,28 @@ const ANALYTICS_WEIGHTS = {
     LIQUIDITY: 0.05
   },
   HERO_TREND_SCORE: {
-    CONTEST_RATE_CHANGE: 0.40,
-    PRO_CONTEST_RATE_CHANGE: 0.20,
-    PICK_RATE: 0.25,
-    BAN_RATE: 0.10,
-    WIN_RATE: 0.05
+    PRO_CONTEST_RATE_CHANGE_7D: 0.40,  // Про-мета за неделю (водопадная мета)
+    PICK_RATE_CHANGE_IMMORTAL_7D: 0.25,  // Immortal за неделю
+    PICK_RATE_IMMORTAL: 0.20,  // Текущая популярность Immortal
+    WIN_RATE: 0.05  // Вспомогательный
+    // Убрано: CONTEST_RATE_CHANGE (фейк, дублировал pickRateChange)
+    // Убрано: BAN_RATE (всегда 0 для обычных матчей)
+    // PICK_RATE_CHANGE_IMMORTAL_24H переходит в Мета сигнал
+  },
+  META_SIGNAL: {
+    PICK_RATE_CHANGE_IMMORTAL_24H: 0.50,  // Главный индикатор патч-имб
+    PRO_CONTEST_RATE_CHANGE_7D: 0.30,    // Про-мета (водопадная)
+    PICK_RATE_CHANGE_IMMORTAL_7D: 0.20   // Недельный тренд Immortal
   }
 }
 
 // Пороги для критических сигналов
 const ANALYTICS_THRESHOLDS = {
-  INVESTMENT_SCORE_CRITICAL: 0.75,
-  BUYBACK_SCORE_CRITICAL: 0.75,
-  HERO_CHANGE_24H: 0.15,      // 15% за 24 часа
-  HERO_CHANGE_7D: 0.10,        // 10% за 7 дней
-  PRICE_CHANGE_24H: 0.20       // 20% за 24 часа
+  INVESTMENT_SCORE_CRITICAL: 75,  // 0-100 шкала
+  BUYBACK_SCORE_CRITICAL: 75,     // 0-100 шкала
+  HERO_CHANGE_24H: 0.15,          // 15% за 24 часа
+  HERO_CHANGE_7D: 0.10,           // 10% за 7 дней
+  PRICE_CHANGE_24H: 0.20          // 20% за 24 часа
 }
 
 // Константы для системы Telegram уведомлений
@@ -434,7 +456,68 @@ const HERO_MAPPING_COLUMNS = {
   IMAGE: 'B',  // Добавлено для отображения изображений предметов
   HERO_NAME: 'C',
   HERO_ID: 'D',
-  AUTO_DETECTED: 'E',
-  CATEGORY: 'F'  // Было G, теперь F после удаления Verified
+  CATEGORY: 'E'  // Было F, теперь E после удаления AUTO_DETECTED
+}
+
+// Ручной маппинг для проблемных предметов, которые не находятся через SteamWebAPI
+// Формат: {itemName: {heroName: string|null, category: string, heroId: number|null}}
+// heroName = null означает общий предмет (Common Item)
+// heroId = null означает, что ID будет заполнен автоматически через heroMapping_fillMissingHeroIds()
+const PROBLEMATIC_ITEMS_MANUAL_MAPPING = {
+  'Crownfall - Dire Creeps': {
+    heroName: null,
+    category: 'Common Item',
+    heroId: null
+  },
+  'Crownfall - Dire Siege Creeps': {
+    heroName: null,
+    category: 'Common Item',
+    heroId: null
+  },
+  'Crownfall - Radiant Creeps': {
+    heroName: null,
+    category: 'Common Item',
+    heroId: null
+  },
+  'Crownfall - Radiant Siege Creeps': {
+    heroName: null,
+    category: 'Common Item',
+    heroId: null
+  },
+  'Fortune\'s Tout': {
+    heroName: 'Oracle',  // Предмет героя Oracle
+    category: 'Hero Item',
+    heroId: null  // Будет заполнен автоматически
+  },
+  'Graxx\'s Strap': {
+    heroName: 'Axe',  // Предмет героя Axe
+    category: 'Hero Item',
+    heroId: null
+  },
+  'Heart of Eztzhok': {
+    heroName: 'Warlock',  // Предмет героя Warlock
+    category: 'Hero Item',
+    heroId: null
+  },
+  'Shifty\'s Shortblade': {
+    heroName: 'Riki',  // Предмет героя Riki
+    category: 'Hero Item',
+    heroId: null
+  },
+  'Sullen Shrine': {
+    heroName: null,
+    category: 'Common Item',
+    heroId: null
+  },
+  'The Eyes of Avilliva - Radiant Towers': {
+    heroName: null,
+    category: 'Common Item',
+    heroId: null
+  },
+  'The Gaze of Scree\'Auk - Dire Towers': {
+    heroName: null,
+    category: 'Common Item',
+    heroId: null
+  }
 }
 

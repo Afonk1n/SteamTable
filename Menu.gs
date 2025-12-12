@@ -105,10 +105,10 @@ function onOpen() {
     .addItem('Инициализировать все таблицы', 'initializeAllTables')
     .addSeparator()
     .addItem('Полная настройка (все шаги)', 'performFullSetup')
-    .addItem('Шаг 0: Расчет Min/Max из SteamWebAPI', 'setupMinMax')
-    .addItem('Шаг 1: Настройка HeroMapping', 'setupHeroMapping')
-    .addItem('Шаг 2: Обновление статистики героев', 'setupHeroStats')
-    .addItem('Шаг 3: Обновление аналитики и метрик', 'setupAnalytics')
+    .addItem('Шаг 1: Расчет Min/Max из SteamWebAPI', 'setupMinMax')
+    .addItem('Шаг 2: Настройка HeroMapping', 'setupHeroMapping')
+    .addItem('Шаг 3: Обновление статистики героев', 'setupHeroStats')
+    .addItem('Шаг 4: Обновление аналитики и метрик', 'setupAnalytics')
     .addSeparator()
     .addItem('Проверить готовность системы', 'checkSystemReadiness')
     .addItem('Проверить состояние автоматизации', 'checkAutomationStatus')
@@ -340,20 +340,18 @@ function performInitialSetup() {
 }
 
 /**
- * Шаг 1: Настройка HeroMapping
- * Синхронизирует предметы и определяет героев
+ * Шаг 2: Настройка HeroMapping
+ * Синхронизирует предметы и определяет героев (объединенная операция)
  */
 function setupHeroMapping() {
   const startTime = Date.now()
   
   try {
-    console.log('Setup: синхронизация HeroMapping...')
-    heroMapping_syncWithHistory()
-    console.log('Setup: HeroMapping синхронизирован')
-    
-    console.log('Setup: автоопределение героев...')
-    heroMapping_autoDetectFromSteamWebAPI()
-    console.log('Setup: герои определены')
+    console.log('Setup: настройка HeroMapping (синхронизация + автоопределение)...')
+    // Объединенная операция: синхронизация и автоопределение в одном вызове
+    // heroMapping_autoDetectFromSteamWebAPI с autoSync=true сначала синхронизирует, затем определяет героев
+    heroMapping_autoDetectFromSteamWebAPI(true, true) // silent=true, autoSync=true
+    console.log('Setup: HeroMapping настроен (предметы синхронизированы, герои определены)')
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(1)
     console.log(`Setup: настройка HeroMapping завершена за ${duration} сек`)
@@ -367,8 +365,21 @@ function setupHeroMapping() {
 }
 
 /**
- * Шаг 2: Обновление статистики героев
+ * Шаг 3: Обновление статистики героев
  * Получает статистику через OpenDota API и синхронизирует в History
+ */
+/**
+ * Шаг 3: Обновление статистики героев
+ * 
+ * ПРИМЕЧАНИЕ О ПРОИЗВОДИТЕЛЬНОСТИ:
+ * Эта функция может выполняться 240-250 секунд (4+ минуты) для ~252 героев.
+ * Это нормально, так как:
+ * - Выполняется запрос к OpenDota API для каждого героя
+ * - Обрабатываются данные для нескольких рангов (Immortal, Divine, Ancient, Legend, Archon, Crusader, Herald)
+ * - Синхронизируется статистика в History для всех предметов
+ * 
+ * Оптимизация уже применена (кэширование, batch-операции), дальнейшее ускорение
+ * возможно только за счет уменьшения количества запросов к API, что снизит качество данных.
  */
 function setupHeroStats() {
   const startTime = Date.now()
@@ -398,7 +409,7 @@ function setupHeroStats() {
 }
 
 /**
- * Шаг 0: Расчет Min/Max из SteamWebAPI (опционально)
+ * Шаг 1: Расчет Min/Max из SteamWebAPI (опционально)
  * Получает Min/Max для всех предметов из SteamWebAPI
  * Выполняется только если Min/Max отсутствуют
  */
@@ -459,7 +470,7 @@ function setupMinMax() {
 }
 
 /**
- * Шаг 3: Обновление аналитики и метрик
+ * Шаг 4: Обновление аналитики и метрик
  * Обновляет аналитику History (включая Min/Max из существующих цен) и Investment Scores
  */
 function setupAnalytics() {
@@ -468,8 +479,9 @@ function setupAnalytics() {
   try {
     console.log('Setup: обновление аналитики History...')
     // history_updateAllAnalytics_ включает обновление Min/Max из существующих цен в колонках
-    history_updateAllAnalytics_()
-    console.log('Setup: аналитика History обновлена (включая Min/Max из существующих цен)')
+    // Пропускаем синхронизацию статистики героев, так как она уже выполнена в setupHeroStats
+    history_updateAllAnalytics_(true) // skipHeroStats = true
+    console.log('Setup: аналитика History обновлена (включая Min/Max из существующих цен, статистика героев пропущена - уже обновлена)')
     
     console.log('Setup: обновление Investment Scores...')
     history_updateInvestmentScores()
@@ -496,10 +508,10 @@ function performFullSetup() {
   const response = ui.alert(
     'Полная настройка',
     'Выполнит все шаги настройки последовательно:\n\n' +
-    '1. Расчет Min/Max из SteamWebAPI (если отсутствуют)\n' +
-    '2. Настройка HeroMapping\n' +
-    '3. Обновление статистики героев\n' +
-    '4. Обновление аналитики и метрик\n\n' +
+    'Шаг 1: Расчет Min/Max из SteamWebAPI (если отсутствуют)\n' +
+    'Шаг 2: Настройка HeroMapping\n' +
+    'Шаг 3: Обновление статистики героев\n' +
+    'Шаг 4: Обновление аналитики и метрик\n\n' +
     '⚠️ Убедитесь, что:\n' +
     '• Таблицы инициализированы\n' +
     '• Предметы добавлены в History\n\n' +
@@ -514,10 +526,10 @@ function performFullSetup() {
   const totalStartTime = Date.now()
   
   try {
-    setupMinMax() // Шаг 0: Min/Max из SteamWebAPI (опционально)
-    setupHeroMapping()
-    setupHeroStats()
-    setupAnalytics()
+    setupMinMax() // Шаг 1: Min/Max из SteamWebAPI (опционально)
+    setupHeroMapping() // Шаг 2: Настройка HeroMapping
+    setupHeroStats() // Шаг 3: Обновление статистики героев
+    setupAnalytics() // Шаг 4: Обновление аналитики и метрик
     
     const totalDuration = ((Date.now() - totalStartTime) / 1000).toFixed(1)
     console.log(`FullSetup: полная настройка завершена за ${totalDuration} сек`)

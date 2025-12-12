@@ -388,6 +388,69 @@ function heroStats_getStats7DaysAgo(heroId, rankCategory) {
 }
 
 /**
+ * Получает статистику героя 24 часа назад
+ * @param {number} heroId - ID героя
+ * @param {string} rankCategory - 'High Rank' или 'All Ranks'
+ * @returns {Object|null} Данные статистики или null
+ */
+function heroStats_getStats24HoursAgo(heroId, rankCategory) {
+  const now = new Date()
+  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  
+  // Ищем ближайшую колонку к этой дате
+  const sheet = getHeroStatsSheet_()
+  if (!sheet) return null
+  
+  const row = heroStats_findRow(heroId, rankCategory)
+  if (row === -1) return null
+  
+  const firstDataCol = HERO_STATS_COLUMNS.FIRST_DATA_COL
+  const lastCol = sheet.getLastColumn()
+  
+  if (lastCol < firstDataCol) return null
+  
+  // Парсим все заголовки и ищем ближайший к нужной дате
+  const dateRow = sheet.getRange(HEADER_ROW, firstDataCol, 1, lastCol - firstDataCol + 1).getDisplayValues()[0]
+  let closestCol = -1
+  let closestDiff = Infinity
+  
+  for (let i = 0; i < dateRow.length; i++) {
+    const header = String(dateRow[i] || '').trim()
+    if (!header) continue
+    
+    try {
+      // Парсим дату и время из формата "DD.MM.YY HH:MM"
+      const parts = header.split(' ')
+      if (parts.length !== 2) continue
+      
+      const dateStr = parts[0]
+      const timeStr = parts[1]
+      const [day, month, year] = dateStr.split('.')
+      const [hour, minute] = timeStr.split(':')
+      const parsedDate = new Date(2000 + parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute))
+      
+      const diff = Math.abs(parsedDate.getTime() - twentyFourHoursAgo.getTime())
+      if (diff < closestDiff) {
+        closestDiff = diff
+        closestCol = firstDataCol + i
+      }
+    } catch (e) {
+      // Пропускаем некорректные заголовки
+      continue
+    }
+  }
+  
+  if (closestCol === -1) return null
+  
+  // Проверяем, что разница не больше 36 часов (допустимая погрешность для 24h)
+  if (closestDiff > 36 * 60 * 60 * 1000) {
+    return null
+  }
+  
+  return heroStats_getStatsData(row, closestCol)
+}
+
+/**
  * Обновляет статистику всех героев
  * Получает данные через OpenDota API и сохраняет в лист
  */
@@ -424,23 +487,38 @@ function heroStats_updateAllStats() {
             'High Rank'
           )
           
-          // Получаем статистику 7 дней назад для расчета изменений
+          // Получаем статистику 7 дней назад и 24 часа назад для расчета изменений
           const stats7DaysAgo = heroStats_getStats7DaysAgo(heroStat.heroId, 'High Rank')
+          const stats24HoursAgo = heroStats_getStats24HoursAgo(heroStat.heroId, 'High Rank')
           
-          // Рассчитываем contestRateChange7d
-          // ИСПРАВЛЕНИЕ: Используем contestRatePercent вместо contestRate для расчета изменений
-          // Это предотвращает аномальные значения при делении на очень маленькие абсолютные значения
-          let contestRateChange7d = 0
-          if (stats7DaysAgo && stats7DaysAgo.contestRatePercent !== undefined && stats7DaysAgo.contestRatePercent > 0) {
-            const currentContestRatePercent = heroStat.contestRatePercent || 0
-            contestRateChange7d = ((currentContestRatePercent - stats7DaysAgo.contestRatePercent) / stats7DaysAgo.contestRatePercent) * 100
+          // Рассчитываем pickRateChange7d (Immortal за неделю)
+          // Используем pickRatePercent вместо contestRatePercent (contestRate был фейком)
+          let pickRateChange7d = 0
+          if (stats7DaysAgo && stats7DaysAgo.pickRatePercent !== undefined && stats7DaysAgo.pickRatePercent > 0) {
+            const currentPickRatePercent = heroStat.pickRatePercent || 0
+            pickRateChange7d = ((currentPickRatePercent - stats7DaysAgo.pickRatePercent) / stats7DaysAgo.pickRatePercent) * 100
             
             // ВАЛИДАЦИЯ: Ограничиваем изменения разумными пределами (-1000% до +1000%)
             const MAX_CHANGE_PERCENT = 1000
             const MIN_CHANGE_PERCENT = -1000
-            if (contestRateChange7d > MAX_CHANGE_PERCENT || contestRateChange7d < MIN_CHANGE_PERCENT) {
-              console.warn(`HeroStats: аномальное изменение contestRate для героя ${heroStat.heroId} (High Rank): ${contestRateChange7d.toFixed(2)}% (ограничено)`)
-              contestRateChange7d = contestRateChange7d > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
+            if (pickRateChange7d > MAX_CHANGE_PERCENT || pickRateChange7d < MIN_CHANGE_PERCENT) {
+              console.warn(`HeroStats: аномальное изменение pickRate для героя ${heroStat.heroId} (High Rank): ${pickRateChange7d.toFixed(2)}% (ограничено)`)
+              pickRateChange7d = pickRateChange7d > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
+            }
+          }
+          
+          // Рассчитываем pickRateChange24h (Immortal за 24 часа) - для Мета сигнала
+          let pickRateChange24h = 0
+          if (stats24HoursAgo && stats24HoursAgo.pickRatePercent !== undefined && stats24HoursAgo.pickRatePercent > 0) {
+            const currentPickRatePercent = heroStat.pickRatePercent || 0
+            pickRateChange24h = ((currentPickRatePercent - stats24HoursAgo.pickRatePercent) / stats24HoursAgo.pickRatePercent) * 100
+            
+            // ВАЛИДАЦИЯ: Ограничиваем изменения разумными пределами
+            const MAX_CHANGE_PERCENT = 1000
+            const MIN_CHANGE_PERCENT = -1000
+            if (pickRateChange24h > MAX_CHANGE_PERCENT || pickRateChange24h < MIN_CHANGE_PERCENT) {
+              console.warn(`HeroStats: аномальное изменение pickRate (24h) для героя ${heroStat.heroId} (High Rank): ${pickRateChange24h.toFixed(2)}% (ограничено)`)
+              pickRateChange24h = pickRateChange24h > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
             }
           }
           
@@ -471,9 +549,11 @@ function heroStats_updateAllStats() {
             proPick: heroStat.proPick || 0,
             proBan: heroStat.proBan || 0,
             proContestRate: currentProContestRate,
-            // Изменения за 7 дней
-            contestRateChange7d: contestRateChange7d,
+            // Изменения за 7 дней и 24 часа
+            pickRateChange7d: pickRateChange7d,  // Immortal за неделю
+            pickRateChange24h: pickRateChange24h,  // Immortal за 24 часа (для Мета сигнала)
             proContestRateChange7d: proContestRateChange7d
+            // Убрано: contestRateChange7d (фейк, дублировал pickRateChange7d)
           }
           
           batchUpdates.push({row, statsData})
@@ -495,22 +575,37 @@ function heroStats_updateAllStats() {
             'All Ranks'
           )
           
-          // Получаем статистику 7 дней назад для расчета изменений
+          // Получаем статистику 7 дней назад и 24 часа назад для расчета изменений
           const stats7DaysAgo = heroStats_getStats7DaysAgo(heroStat.heroId, 'All Ranks')
+          const stats24HoursAgo = heroStats_getStats24HoursAgo(heroStat.heroId, 'All Ranks')
           
-          // Рассчитываем contestRateChange7d
-          // ИСПРАВЛЕНИЕ: Используем contestRatePercent вместо contestRate для расчета изменений
-          let contestRateChange7d = 0
-          if (stats7DaysAgo && stats7DaysAgo.contestRatePercent !== undefined && stats7DaysAgo.contestRatePercent > 0) {
-            const currentContestRatePercent = heroStat.contestRatePercent || 0
-            contestRateChange7d = ((currentContestRatePercent - stats7DaysAgo.contestRatePercent) / stats7DaysAgo.contestRatePercent) * 100
+          // Рассчитываем pickRateChange7d (All Ranks за неделю)
+          let pickRateChange7d = 0
+          if (stats7DaysAgo && stats7DaysAgo.pickRatePercent !== undefined && stats7DaysAgo.pickRatePercent > 0) {
+            const currentPickRatePercent = heroStat.pickRatePercent || 0
+            pickRateChange7d = ((currentPickRatePercent - stats7DaysAgo.pickRatePercent) / stats7DaysAgo.pickRatePercent) * 100
             
             // ВАЛИДАЦИЯ: Ограничиваем изменения разумными пределами (-1000% до +1000%)
             const MAX_CHANGE_PERCENT = 1000
             const MIN_CHANGE_PERCENT = -1000
-            if (contestRateChange7d > MAX_CHANGE_PERCENT || contestRateChange7d < MIN_CHANGE_PERCENT) {
-              console.warn(`HeroStats: аномальное изменение contestRate для героя ${heroStat.heroId} (All Ranks): ${contestRateChange7d.toFixed(2)}% (ограничено)`)
-              contestRateChange7d = contestRateChange7d > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
+            if (pickRateChange7d > MAX_CHANGE_PERCENT || pickRateChange7d < MIN_CHANGE_PERCENT) {
+              console.warn(`HeroStats: аномальное изменение pickRate для героя ${heroStat.heroId} (All Ranks): ${pickRateChange7d.toFixed(2)}% (ограничено)`)
+              pickRateChange7d = pickRateChange7d > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
+            }
+          }
+          
+          // Рассчитываем pickRateChange24h (All Ranks за 24 часа) - для Мета сигнала
+          let pickRateChange24h = 0
+          if (stats24HoursAgo && stats24HoursAgo.pickRatePercent !== undefined && stats24HoursAgo.pickRatePercent > 0) {
+            const currentPickRatePercent = heroStat.pickRatePercent || 0
+            pickRateChange24h = ((currentPickRatePercent - stats24HoursAgo.pickRatePercent) / stats24HoursAgo.pickRatePercent) * 100
+            
+            // ВАЛИДАЦИЯ: Ограничиваем изменения разумными пределами
+            const MAX_CHANGE_PERCENT = 1000
+            const MIN_CHANGE_PERCENT = -1000
+            if (pickRateChange24h > MAX_CHANGE_PERCENT || pickRateChange24h < MIN_CHANGE_PERCENT) {
+              console.warn(`HeroStats: аномальное изменение pickRate (24h) для героя ${heroStat.heroId} (All Ranks): ${pickRateChange24h.toFixed(2)}% (ограничено)`)
+              pickRateChange24h = pickRateChange24h > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
             }
           }
           
@@ -535,15 +630,17 @@ function heroStats_updateAllStats() {
             winRate: heroStat.winRate || 0,
             banRate: heroStat.banRate || 0,
             contestRate: heroStat.contestRate || 0,
-            contestRatePercent: heroStat.contestRatePercent || 0, // Процент контестов
+            contestRatePercent: heroStat.contestRatePercent || 0, // Процент контестов (равен pickRatePercent)
             matchCount: heroStat.matchCount || 0,
             // Про-статистика
             proPick: heroStat.proPick || 0,
             proBan: heroStat.proBan || 0,
             proContestRate: currentProContestRate,
-            // Изменения за 7 дней
-            contestRateChange7d: contestRateChange7d,
+            // Изменения за 7 дней и 24 часа
+            pickRateChange7d: pickRateChange7d,  // All Ranks за неделю
+            pickRateChange24h: pickRateChange24h,  // All Ranks за 24 часа (для Мета сигнала)
             proContestRateChange7d: proContestRateChange7d
+            // Убрано: contestRateChange7d (фейк, дублировал pickRateChange7d)
           }
           
           batchUpdates.push({row, statsData})

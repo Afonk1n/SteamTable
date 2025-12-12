@@ -51,9 +51,10 @@ function openDota_fetchHeroStats(rankTier = null) {
     // 1 = Herald, 2 = Guardian, 3 = Crusader, 4 = Archon, 5 = Legend
     // 6 = Ancient, 7 = Divine, 8 = Immortal
     const heroStats = heroes.map(hero => {
-      // Вычисляем статистику для "High Rank" (Ancient + Divine + Immortal = 6+7+8)
-      const highRankPick = (hero['6_pick'] || 0) + (hero['7_pick'] || 0) + (hero['8_pick'] || 0)
-      const highRankWin = (hero['6_win'] || 0) + (hero['7_win'] || 0) + (hero['8_win'] || 0)
+      // Вычисляем статистику для "High Rank" (только Immortal = ранг 8)
+      // Изменено: было Ancient+Divine+Immortal (6+7+8), стало только Immortal (8)
+      const highRankPick = hero['8_pick'] || 0
+      const highRankWin = hero['8_win'] || 0
       const highRankWinRate = highRankPick > 0 ? (highRankWin / highRankPick) * 100 : 0
       
       // Вычисляем статистику для "All Ranks" (все ранги 1-8)
@@ -66,12 +67,11 @@ function openDota_fetchHeroStats(rankTier = null) {
       // Про-статистика (pro_pick, pro_ban)
       const proPick = hero.pro_pick || 0
       const proBan = hero.pro_ban || 0
-      const proBanRate = proPick > 0 ? (proBan / proPick) * 100 : 0
       const proContestRate = proPick + proBan // Контест рейт для про-матчей
       
-      // Pick rate - это абсолютное количество пиков (для нормализации потребуется общая сумма всех пиков)
-      // Для текущей реализации используем абсолютные значения
-      // Контест rate = pick + ban
+      // ВАЖНО: OpenDota API не предоставляет banRate для обычных матчей (только для про-матчей)
+      // Поэтому contestRate = pickRate (без банов)
+      // banRate доступен только для про-матчей (proBan)
       
       return {
         heroId: hero.id,
@@ -80,8 +80,8 @@ function openDota_fetchHeroStats(rankTier = null) {
         highRank: {
           pickRate: highRankPick, // Абсолютное значение (пиков)
           winRate: highRankWinRate, // Процент побед
-          banRate: proBanRate, // Процент баннов (из про-матчей)
-          contestRate: highRankPick + proBan, // Абсолютное значение (пики + баны)
+          banRate: 0, // Недоступно для обычных матчей (OpenDota API не предоставляет)
+          contestRate: highRankPick, // Равен pickRate (баны недоступны для обычных матчей)
           matchCount: highRankPick,
           // Про-статистика
           proPick: proPick,
@@ -92,8 +92,8 @@ function openDota_fetchHeroStats(rankTier = null) {
         allRanks: {
           pickRate: allRanksPick, // Абсолютное значение (пиков)
           winRate: allRanksWinRate, // Процент побед
-          banRate: proBanRate, // Процент баннов (из про-матчей)
-          contestRate: allRanksPick + proBan, // Абсолютное значение (пики + баны)
+          banRate: 0, // Недоступно для обычных матчей (OpenDota API не предоставляет)
+          contestRate: allRanksPick, // Равен pickRate (баны недоступны для обычных матчей)
           matchCount: allRanksPick,
           // Про-статистика
           proPick: proPick,

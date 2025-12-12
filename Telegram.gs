@@ -603,7 +603,7 @@ function telegram_sendDailyReport() {
       Utilities.sleep(LIMITS.TELEGRAM_REPORT_DELAY_MS)
     }
     
-    // Сообщение 2: Топ-5 возможностей из History (Investment Score >= 0.75, НЕ в портфеле)
+    // Сообщение 2: Топ-5 возможностей из History (Investment Score >= 75, НЕ в портфеле)
     const historySheet = getHistorySheet_()
     const investSheet = getInvestSheet_()
     if (historySheet && investSheet) {
@@ -655,7 +655,7 @@ function telegram_sendDailyReport() {
       }
     }
     
-    // Сообщение 3: Топ-5 откупов из Sales (Buyback Score >= 0.75)
+    // Сообщение 3: Топ-5 откупов из Sales (Buyback Score >= 75)
     const salesSheet = getSalesSheet_()
     if (salesSheet) {
       const salesLastRow = salesSheet.getLastRow()
@@ -819,19 +819,21 @@ function telegram_parseScore_(formattedScore) {
 
 /**
  * Получает смайлик по значению Investment Score
- * @param {number} score - Score от 0 до 1
+ * @param {number} score - Score от 0 до 100 (или от 0 до 1, автоматически нормализуется)
  * @returns {string} Смайлик (🟢, 🟡, ⚪, 🔴)
  */
 function telegram_getScoreEmoji_(score) {
   if (typeof score !== 'number' || isNaN(score)) return '⚪'
-  // Круглые эмодзи: 🟢 (>=0.75), 🟡 (>=0.60), ⚪ (>=0.40), 🔴 (<0.40)
-  return score >= 0.75 ? '🟢' : score >= 0.60 ? '🟡' : score >= 0.40 ? '⚪' : '🔴'
+  // Нормализуем: если значение < 1, умножаем на 100
+  const normalizedScore = score < 1 ? score * 100 : score
+  // Круглые эмодзи: 🟢 (>=75), 🟡 (>=60), ⚪ (>=40), 🔴 (<40)
+  return normalizedScore >= 75 ? '🟢' : normalizedScore >= 60 ? '🟡' : normalizedScore >= 40 ? '⚪' : '🔴'
 }
 
 /**
  * Форматирует название предмета с Investment Score
  * @param {string} name - Название предмета
- * @param {number|string|null} investmentScore - Investment Score (число или отформатированная строка)
+ * @param {number|string|null} investmentScore - Investment Score (число или отформатированная строка, 0-100)
  * @returns {string} Отформатированное название с смайликом и скором
  */
 function telegram_formatItemNameWithScore_(name, investmentScore) {
@@ -845,13 +847,16 @@ function telegram_formatItemNameWithScore_(name, investmentScore) {
     return `Предмет: <b>${name}</b>`
   }
   
-  const emoji = telegram_getScoreEmoji_(score)
-  return `Предмет: <b>${name}</b> ${emoji} ${score.toFixed(2)}`
+  // Нормализуем: если значение < 1, умножаем на 100
+  const normalizedScore = score < 1 ? Math.round(score * 100) : Math.round(score)
+  
+  const emoji = telegram_getScoreEmoji_(normalizedScore)
+  return `Предмет: <b>${name}</b> ${emoji} ${normalizedScore}`
 }
 
 /**
  * Проверяет Investment Score из History для предметов НЕ в портфеле
- * Отправляет критические уведомления для предметов с Investment Score >= 0.75
+ * Отправляет критические уведомления для предметов с Investment Score >= 75 (0-100 шкала)
  */
 function telegram_checkHistoryInvestmentOpportunities_() {
   const config = telegram_getConfig()
@@ -965,7 +970,7 @@ function telegram_checkHistoryInvestmentOpportunities_() {
 
 /**
  * Проверяет Buyback Score из Sales
- * Отправляет критические уведомления для предметов с Buyback Score >= 0.75
+ * Отправляет критические уведомления для предметов с Buyback Score >= 75 (0-100 шкала)
  */
 function telegram_checkSalesBuybackOpportunities_() {
   const config = telegram_getConfig()
@@ -1064,6 +1069,127 @@ function telegram_checkSalesBuybackOpportunities_() {
   
   if (opportunities.length > 0) {
     console.log(`Telegram: отправлено ${opportunities.length} уведомлений об откупах из Sales`)
+  }
+}
+
+/**
+ * Проверяет Мета сигнал из History/Invest/Sales
+ * Отправляет горячие уведомления для предметов с Мета сигналом >= 70 (0-100 шкала)
+ * Это краткосрочный индикатор патч-имб и быстрых изменений меты
+ */
+function telegram_checkMetaSignalOpportunities_() {
+  const config = telegram_getConfig()
+  if (!config) return
+  
+  // Проверяем History (основной источник данных)
+  const historySheet = getHistorySheet_()
+  if (!historySheet) return
+  
+  const lastRow = historySheet.getLastRow()
+  if (lastRow <= 1) return
+  
+  // Читаем данные batch-запросом
+  const count = lastRow - 1
+  const names = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), count, 1).getValues()
+  const metaSignals = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.META_SIGNAL), count, 1).getValues()
+  const heroTrends = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.HERO_TREND), count, 1).getValues()
+  const investmentScores = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.INVESTMENT_SCORE), count, 1).getValues()
+  const currentPrices = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.CURRENT_PRICE), count, 1).getValues()
+  const heroNames = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.HERO_NAME), count, 1).getValues()
+  
+  const opportunities = []
+  const META_SIGNAL_THRESHOLD = 70 // Порог для горячих уведомлений
+  
+  for (let i = 0; i < count; i++) {
+    const name = String(names[i][0] || '').trim()
+    if (!name) continue
+    
+    const metaSignalStr = String(metaSignals[i][0] || '').trim()
+    if (!metaSignalStr || metaSignalStr === '—') continue
+    
+    // Парсим Мета сигнал (формат: "🔥 92" или "🟡 65")
+    const metaSignalMatch = metaSignalStr.match(/(\d+)/)
+    if (!metaSignalMatch) continue
+    
+    const metaSignal = parseInt(metaSignalMatch[1])
+    if (!metaSignal || metaSignal < META_SIGNAL_THRESHOLD) continue
+    
+    const heroTrendStr = String(heroTrends[i][0] || '').trim()
+    const heroTrend = telegram_parseScore_(heroTrendStr)
+    const investmentScoreStr = String(investmentScores[i][0] || '').trim()
+    const investmentScore = telegram_parseScore_(investmentScoreStr)
+    const currentPrice = Number(currentPrices[i][0]) || 0
+    const heroName = String(heroNames[i][0] || '').trim()
+    
+    const eventId = `meta_signal_${metaSignal}`
+    const cooldownMs = 6 * 60 * 60 * 1000 // 6 часов (короткий период для быстрых сигналов)
+    
+    // Проверяем cooldown
+    if (telegram_checkNotificationSent_('META_SIGNAL', name, eventId, cooldownMs)) {
+      continue
+    }
+    
+    opportunities.push({
+      name,
+      metaSignal,
+      heroTrend,
+      investmentScore,
+      currentPrice,
+      heroName,
+      eventId
+    })
+  }
+  
+  // Сортируем по Мета сигналу (от большего к меньшему)
+  opportunities.sort((a, b) => b.metaSignal - a.metaSignal)
+  
+  // Отправляем горячие уведомления (максимум 5 за раз, чтобы не спамить)
+  const topOpportunities = opportunities.slice(0, 5)
+  
+  for (const opp of topOpportunities) {
+    const heroTrendInfo = opp.heroTrend !== null
+      ? `\nТренд героя: ${analytics_formatScore(opp.heroTrend)}`
+      : ''
+    
+    const investmentScoreInfo = opp.investmentScore !== null
+      ? `\nОценка инвестиции: ${analytics_formatScore(opp.investmentScore)}`
+      : ''
+    
+    const heroNameInfo = opp.heroName
+      ? `\nГерой: ${opp.heroName}`
+      : ''
+    
+    const formattedName = telegram_formatItemNameWithScore_(opp.name, opp.investmentScore || 0)
+    const message = `🔥 <b>Горячий Мета сигнал!</b>\n\n` +
+      `Предмет: ${formattedName}` +
+      heroNameInfo +
+      `\nМета сигнал: ${analytics_formatMetaSignal(opp.metaSignal)}` +
+      heroTrendInfo +
+      investmentScoreInfo +
+      `\nТекущая цена: ${opp.currentPrice.toFixed(2)} ₽\n\n` +
+      `⚠️ <i>Краткосрочный индикатор патч-имб. Быстрые изменения меты!</i>`
+    
+    const result = telegram_sendMessage(message)
+    if (result.ok) {
+      telegram_saveNotification_(
+        'META_SIGNAL',
+        opp.name,
+        opp.eventId,
+        {
+          metaSignal: opp.metaSignal,
+          heroTrend: opp.heroTrend,
+          investmentScore: opp.investmentScore,
+          currentPrice: opp.currentPrice,
+          heroName: opp.heroName
+        },
+        TELEGRAM_PRIORITY.CRITICAL
+      )
+      Utilities.sleep(LIMITS.TELEGRAM_MESSAGE_DELAY_MS)
+    }
+  }
+  
+  if (topOpportunities.length > 0) {
+    console.log(`Telegram: отправлено ${topOpportunities.length} уведомлений о Мета сигнале`)
   }
 }
 

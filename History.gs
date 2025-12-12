@@ -59,19 +59,27 @@ function history_formatTable() {
     sheet.getRange(DATA_START_ROW, potentialCol, lastRow - 1, 1)
       .setNumberFormat('+0%;-0%;"—"')
     // Форматирование колонок статистики героя:
-    // P (Contest Rate Change 7d) - процент изменения
-    const contestRateChangeCol = getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CHANGE_7D)
-    sheet.getRange(DATA_START_ROW, contestRateChangeCol, lastRow - 1, 1)
+    // O (Pro Contest Rate current) - процент контест-рейта про-сцены
+    const proContestRateCol = getColumnIndex(HISTORY_COLUMNS.PRO_CONTEST_RATE_CURRENT)
+    sheet.getRange(DATA_START_ROW, proContestRateCol, lastRow - 1, 1)
       .setNumberFormat(NUMBER_FORMATS.PERCENT)
-    // Q (Contest Rate current) - процент участия в контестах
-    const contestRateCol = getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CURRENT)
-    sheet.getRange(DATA_START_ROW, contestRateCol, lastRow - 1, 1)
+    // P (Pro Contest Rate Change 7d) - процент изменения
+    const proContestRateChangeCol = getColumnIndex(HISTORY_COLUMNS.PRO_CONTEST_RATE_CHANGE_7D)
+    sheet.getRange(DATA_START_ROW, proContestRateChangeCol, lastRow - 1, 1)
       .setNumberFormat(NUMBER_FORMATS.PERCENT)
-    // R (Pick Rate current) - процент пиков
-    const pickRateCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CURRENT)
+    // Q (Pick Rate Change Immortal 7d) - процент изменения за неделю
+    const pickRateChange7dCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CHANGE_IMMORTAL_7D)
+    sheet.getRange(DATA_START_ROW, pickRateChange7dCol, lastRow - 1, 1)
+      .setNumberFormat(NUMBER_FORMATS.PERCENT)
+    // R (Pick Rate Change Immortal 24h) - процент изменения за 24ч
+    const pickRateChange24hCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CHANGE_IMMORTAL_24H)
+    sheet.getRange(DATA_START_ROW, pickRateChange24hCol, lastRow - 1, 1)
+      .setNumberFormat(NUMBER_FORMATS.PERCENT)
+    // S (Pick Rate Immortal) - процент пиков Immortal
+    const pickRateCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_IMMORTAL)
     sheet.getRange(DATA_START_ROW, pickRateCol, lastRow - 1, 1)
       .setNumberFormat(NUMBER_FORMATS.PERCENT)
-    // S (Win Rate current) - процент
+    // T (Win Rate current) - процент
     const winRateCol = getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)
     sheet.getRange(DATA_START_ROW, winRateCol, lastRow - 1, 1)
       .setNumberFormat(NUMBER_FORMATS.PERCENT)
@@ -128,12 +136,15 @@ function history_formatTable() {
 }
 
 // Обновляет всю аналитику History: текущая цена, min/max, тренды, форматирование
-function history_updateAllAnalytics_() {
+// @param {boolean} skipHeroStats - Если true, пропускает синхронизацию статистики героев (для оптимизации setup)
+function history_updateAllAnalytics_(skipHeroStats = false) {
   const sheet = getOrCreateHistorySheet_()
   history_updateCurrentPriceMinMax_(sheet)
   history_updateTrends()
-  // Синхронизация статистики героев (колонки O-T)
-  history_syncHeroStats()
+  // Синхронизация статистики героев (колонки O-T) - пропускаем если уже выполнена в setup
+  if (!skipHeroStats) {
+    history_syncHeroStats()
+  }
   // ВАЖНО: Сначала применяем условное форматирование (для трендов, фаз, рекомендаций),
   // затем выделение min/max, чтобы оно не перезаписывалось условным форматированием
   history_applyAllConditionalFormatting_(sheet)
@@ -708,8 +719,24 @@ function history_updateCurrentPriceMinMax_(sheet = null) {
     
     // Если есть цена за текущий период - используем её
     // Если нет, но есть последняя заполненная цена - используем её (будет окрашена в желтый)
-    // Только если вообще нет цен - ставим null
-    currentPrices[i][0] = currentPeriodPrice || lastFoundPrice
+    // Если нет цен в колонках, но текущая цена уже заполнена - сохраняем её (не перезаписываем на null)
+    // Только если вообще нет цен и текущая цена пустая - ставим null
+    const existingCurrentPrice = currentPrices[i][0]
+    const hasExistingCurrentPrice = existingCurrentPrice !== null && 
+                                    existingCurrentPrice !== '' && 
+                                    Number.isFinite(Number(existingCurrentPrice)) && 
+                                    Number(existingCurrentPrice) > 0
+    
+    if (currentPeriodPrice || lastFoundPrice) {
+      // Есть цена в колонках - используем её
+      currentPrices[i][0] = currentPeriodPrice || lastFoundPrice
+    } else if (hasExistingCurrentPrice) {
+      // Нет цен в колонках, но текущая цена уже заполнена - сохраняем её (не перезаписываем на null)
+      currentPrices[i][0] = existingCurrentPrice
+    } else {
+      // Нет цен вообще - ставим null (не используем среднее из Min/Max, это некорректные данные)
+      currentPrices[i][0] = null
+    }
     
     // ЛОГИКА Min/Max:
     // Min/Max получаются из SteamWebAPI один раз при первоначальной настройке
@@ -1764,18 +1791,18 @@ function history_calculateGrowthPotential_(prices) {
 
 // Генерация рекомендации на основе анализа
 function history_generateRecommendation_(phase, trend, potential, daysChange, investmentScore = null, heroTrend = null) {
-  // Если есть Investment Score, используем его
+  // Если есть Investment Score, используем его (0-100 шкала)
   if (investmentScore !== null && typeof investmentScore === 'number' && !isNaN(investmentScore)) {
-    if (investmentScore >= 0.75) {
-      return `🟩 КУПИТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+    if (investmentScore >= 75) {
+      return '🟩 КУПИТЬ'
     }
-    if (investmentScore >= 0.60) {
-      return `🟨 ДЕРЖАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+    if (investmentScore >= 60) {
+      return '🟨 ДЕРЖАТЬ'
     }
-    if (investmentScore < 0.40) {
-      return `🟥 ПРОДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+    if (investmentScore < 40) {
+      return '🟥 ПРОДАТЬ'
     }
-    return `👀 НАБЛЮДАТЬ (Score: ${(investmentScore * 100).toFixed(0)}%)`
+    return '👀 НАБЛЮДАТЬ'
   }
   
   // Fallback на старую логику, если Investment Score не рассчитан
@@ -1818,47 +1845,96 @@ function history_generateRecommendation_(phase, trend, potential, daysChange, in
 /**
  * Синхронизация статистики героев из HeroStats в History
  * Обновляет колонки O-T (Hero Trend, Contest Rate Change, Contest Rate, Pick Rate, Win Rate, Hero Name)
+ * Оптимизировано: кэширование статистики и Hero Trend Score по heroId
  */
 function history_syncHeroStats() {
   const sheet = getOrCreateHistorySheet_()
   const lastRow = sheet.getLastRow()
   if (lastRow < DATA_START_ROW) return
   
+  const startTime = Date.now()
+  const TIME_BUDGET_MS = 300000 // 5 минут (оставляем запас до лимита 6 минут)
+  
   const mappings = heroMapping_getAllMappings()
   const itemNames = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
   
-  // Получаем все маппинги для оптимизации
-  const heroDataMap = {}
+  // ОПТИМИЗАЦИЯ: Собираем уникальные heroId и кэшируем статистику для каждого
+  const uniqueHeroIds = new Set()
   for (const itemName of Object.keys(mappings)) {
     const mapping = mappings[itemName]
     if (mapping.heroId && mapping.category === 'Hero Item') {
-      if (!heroDataMap[mapping.heroId]) {
-        heroDataMap[mapping.heroId] = {}
+      uniqueHeroIds.add(mapping.heroId)
+    }
+  }
+  
+  // ОПТИМИЗАЦИЯ: Кэшируем статистику для каждого уникального heroId (вызываем getLatestStats только один раз)
+  const heroDataMap = {}
+  const heroTrendScoreCache = {} // Кэш для Hero Trend Score по heroId
+  
+  for (const heroId of uniqueHeroIds) {
+    // Проверка времени выполнения
+    if (Date.now() - startTime > TIME_BUDGET_MS) {
+      console.warn(`History: history_syncHeroStats прервано по таймауту (обработано ${Object.keys(heroDataMap).length} из ${uniqueHeroIds.size} героев)`)
+      break
+    }
+    
+    // Находим mapping для получения heroName (берем первый попавшийся предмет с этим heroId)
+    let heroName = null
+    let rankCategory = null
+    for (const itemName of Object.keys(mappings)) {
+      const mapping = mappings[itemName]
+      if (mapping.heroId === heroId && mapping.category === 'Hero Item') {
+        heroName = mapping.heroName
+        break
       }
-      // Приоритет: High Rank > All Ranks
-      const highRankStats = heroStats_getLatestStats(mapping.heroId, 'High Rank')
-      const allRanksStats = heroStats_getLatestStats(mapping.heroId, 'All Ranks')
-      heroDataMap[mapping.heroId].stats = highRankStats || allRanksStats
-      heroDataMap[mapping.heroId].rankCategory = highRankStats ? 'High Rank' : 'All Ranks'
-      heroDataMap[mapping.heroId].heroName = mapping.heroName
+    }
+    
+    // Приоритет: High Rank > All Ranks (вызываем только один раз для каждого)
+    const highRankStats = heroStats_getLatestStats(heroId, 'High Rank')
+    const allRanksStats = heroStats_getLatestStats(heroId, 'All Ranks')
+    const stats = highRankStats || allRanksStats
+    rankCategory = highRankStats ? 'High Rank' : 'All Ranks'
+    
+    if (stats) {
+      heroDataMap[heroId] = {
+        stats: stats,
+        rankCategory: rankCategory,
+        heroName: heroName
+      }
+      
+      // ОПТИМИЗАЦИЯ: Кэшируем Hero Trend Score для этого heroId (вычисляем один раз)
+      try {
+        const heroStatsObj = {[rankCategory]: stats}
+        const heroTrendScore = analytics_calculateHeroTrendScore(heroId, rankCategory, heroStatsObj)
+        heroTrendScoreCache[heroId] = analytics_formatScore(heroTrendScore)
+      } catch (e) {
+        console.error(`History: ошибка расчета Hero Trend Score для heroId ${heroId}:`, e)
+        heroTrendScoreCache[heroId] = ''
+      }
     }
   }
   
   // ОПТИМИЗАЦИЯ: Подготавливаем данные для batch записи
   const heroNames = []
   const heroTrends = []
-  const contestRateChanges = []
-  const contestRates = []
+  const proContestRates = []
+  const proContestRateChanges = []
+  const pickRateChanges7d = []
+  const pickRateChanges24h = []
   const pickRates = []
   const winRates = []
+  const metaSignals = []
   const updateRows = []
   
   const heroNameCol = getColumnIndex(HISTORY_COLUMNS.HERO_NAME)
   const heroTrendCol = getColumnIndex(HISTORY_COLUMNS.HERO_TREND)
-  const contestRateChangeCol = getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CHANGE_7D)
-  const contestRateCol = getColumnIndex(HISTORY_COLUMNS.CONTEST_RATE_CURRENT)
-  const pickRateCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CURRENT)
+  const proContestRateCol = getColumnIndex(HISTORY_COLUMNS.PRO_CONTEST_RATE_CURRENT)
+  const proContestRateChangeCol = getColumnIndex(HISTORY_COLUMNS.PRO_CONTEST_RATE_CHANGE_7D)
+  const pickRateChange7dCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CHANGE_IMMORTAL_7D)
+  const pickRateChange24hCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_CHANGE_IMMORTAL_24H)
+  const pickRateCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_IMMORTAL)
   const winRateCol = getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)
+  const metaSignalCol = getColumnIndex(HISTORY_COLUMNS.META_SIGNAL)
   
   // Подготавливаем все значения
   for (let i = 0; i < itemNames.length; i++) {
@@ -1866,10 +1942,13 @@ function history_syncHeroStats() {
     if (!itemName) {
       heroNames.push([''])
       heroTrends.push([''])
-      contestRateChanges.push([''])
-      contestRates.push([''])
+      proContestRates.push([''])
+      proContestRateChanges.push([''])
+      pickRateChanges7d.push([''])
+      pickRateChanges24h.push([''])
       pickRates.push([''])
       winRates.push([''])
+      metaSignals.push([''])
       continue
     }
     
@@ -1883,44 +1962,79 @@ function history_syncHeroStats() {
         try {
           const stats = typeof heroData.stats === 'string' ? JSON.parse(heroData.stats) : heroData.stats
           
-          // Рассчитываем Hero Trend Score (передаем объект с ключом rankCategory)
-          const heroStatsObj = {[heroData.rankCategory]: heroData.stats}
-          const heroTrendScore = analytics_calculateHeroTrendScore(mapping.heroId, heroData.rankCategory, heroStatsObj)
+          // ОПТИМИЗАЦИЯ: Используем кэшированный Hero Trend Score вместо пересчета
+          const heroTrendScore = heroTrendScoreCache[mapping.heroId] || ''
           
           heroNames.push([heroData.heroName || ''])
-          heroTrends.push([analytics_formatScore(heroTrendScore)])
-          contestRateChanges.push([stats.contestRateChange7d || 0])
-          // ВАЖНО: contestRatePercent и pickRatePercent уже в формате доли (0.0518 = 5.18%), НЕ нужно делить на 100
-          // winRate уже в процентах (52.02 = 52.02%), формат процента в Google Sheets умножает на 100, поэтому делим на 100
-          contestRates.push([stats.contestRatePercent !== undefined ? stats.contestRatePercent : 0])
-          pickRates.push([stats.pickRatePercent !== undefined ? stats.pickRatePercent : 0])
+          heroTrends.push([heroTrendScore])
+          
+          // Pro Contest Rate (текущий) - в процентах (45.2 = 45.2%), формат процента умножает на 100, поэтому делим на 100
+          proContestRates.push([stats.proContestRate ? stats.proContestRate / 100 : 0])
+          
+          // Pro Contest Rate Change (7d) - в процентах (15 = 15%), формат процента умножает на 100, поэтому делим на 100
+          proContestRateChanges.push([stats.proContestRateChange7d ? stats.proContestRateChange7d / 100 : 0])
+          
+          // Pick Rate Change Immortal (7d) - в процентах (10 = 10%), формат процента умножает на 100, поэтому делим на 100
+          pickRateChanges7d.push([stats.pickRateChange7d ? stats.pickRateChange7d / 100 : 0])
+          
+          // Pick Rate Change Immortal (24h) - в процентах (25 = 25%), формат процента умножает на 100, поэтому делим на 100
+          pickRateChanges24h.push([stats.pickRateChange24h ? stats.pickRateChange24h / 100 : 0])
+          
+          // Pick Rate Immortal - в процентах (1.4 = 1.4%), формат процента умножает на 100, поэтому делим на 100
+          pickRates.push([stats.pickRatePercent !== undefined ? stats.pickRatePercent / 100 : 0])
+          
+          // Win Rate - в процентах (52.02 = 52.02%), формат процента умножает на 100, поэтому делим на 100
           winRates.push([stats.winRate ? stats.winRate / 100 : 0])
+          
+          // Мета сигнал - рассчитываем отдельно
+          let metaSignal = ''
+          try {
+            // Используем те же данные, что и для Hero Trend Score
+            const rankCategoryForMeta = heroData.rankCategory || (mapping && mapping.heroId ? 'High Rank' : null)
+            if (rankCategoryForMeta && heroData.stats) {
+              const heroStatsObjForMeta = {[rankCategoryForMeta]: heroData.stats}
+              const metaSignalScore = analytics_calculateMetaSignal(mapping.heroId, rankCategoryForMeta, heroStatsObjForMeta)
+              metaSignal = analytics_formatMetaSignal(metaSignalScore)
+            }
+          } catch (e) {
+            console.error(`History: ошибка расчета Мета сигнала для heroId ${mapping.heroId}:`, e)
+          }
+          metaSignals.push([metaSignal])
         } catch (e) {
           console.log(`Ошибка при подготовке статистики для ${itemName}: ${e.message}`)
           heroNames.push([''])
           heroTrends.push([''])
-          contestRateChanges.push([''])
-          contestRates.push([''])
+          proContestRates.push([''])
+          proContestRateChanges.push([''])
+          pickRateChanges7d.push([''])
+          pickRateChanges24h.push([''])
           pickRates.push([''])
           winRates.push([''])
+          metaSignals.push([''])
         }
       } else {
         // Нет данных о герое
         heroNames.push([''])
         heroTrends.push([''])
-        contestRateChanges.push([''])
-        contestRates.push([''])
+        proContestRates.push([''])
+        proContestRateChanges.push([''])
+        pickRateChanges7d.push([''])
+        pickRateChanges24h.push([''])
         pickRates.push([''])
         winRates.push([''])
+        metaSignals.push([''])
       }
     } else {
       // Общий предмет - очищаем колонки
       heroNames.push([''])
       heroTrends.push([''])
-      contestRateChanges.push([''])
-      contestRates.push([''])
+      proContestRates.push([''])
+      proContestRateChanges.push([''])
+      pickRateChanges7d.push([''])
+      pickRateChanges24h.push([''])
       pickRates.push([''])
       winRates.push([''])
+      metaSignals.push([''])
     }
   }
   
@@ -1929,10 +2043,13 @@ function history_syncHeroStats() {
     const count = heroNames.length
     sheet.getRange(DATA_START_ROW, heroNameCol, count, 1).setValues(heroNames)
     sheet.getRange(DATA_START_ROW, heroTrendCol, count, 1).setValues(heroTrends)
-    sheet.getRange(DATA_START_ROW, contestRateChangeCol, count, 1).setValues(contestRateChanges)
-    sheet.getRange(DATA_START_ROW, contestRateCol, count, 1).setValues(contestRates)
+    sheet.getRange(DATA_START_ROW, proContestRateCol, count, 1).setValues(proContestRates)
+    sheet.getRange(DATA_START_ROW, proContestRateChangeCol, count, 1).setValues(proContestRateChanges)
+    sheet.getRange(DATA_START_ROW, pickRateChange7dCol, count, 1).setValues(pickRateChanges7d)
+    sheet.getRange(DATA_START_ROW, pickRateChange24hCol, count, 1).setValues(pickRateChanges24h)
     sheet.getRange(DATA_START_ROW, pickRateCol, count, 1).setValues(pickRates)
     sheet.getRange(DATA_START_ROW, winRateCol, count, 1).setValues(winRates)
+    sheet.getRange(DATA_START_ROW, metaSignalCol, count, 1).setValues(metaSignals)
   }
   
   // Проверяем изменения Hero Trend Score (важные уведомления)
@@ -1940,6 +2057,14 @@ function history_syncHeroStats() {
     telegram_checkHeroTrendChanges_()
   } catch (e) {
     console.error('History: ошибка при проверке изменений Hero Trend Score:', e)
+    // Не прерываем выполнение, просто логируем ошибку
+  }
+  
+  // Проверяем Мета сигнал (горячие уведомления о патч-имбах)
+  try {
+    telegram_checkMetaSignalOpportunities_()
+  } catch (e) {
+    console.error('History: ошибка при проверке Мета сигнала:', e)
     // Не прерываем выполнение, просто логируем ошибку
   }
 }

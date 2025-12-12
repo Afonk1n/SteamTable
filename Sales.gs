@@ -36,6 +36,19 @@ function sales_dailyReset() {
     `${SALES_CONFIG.COLUMNS.CURRENT_PRICE}2:${SALES_CONFIG.COLUMNS.PRICE_DROP}${lastRow}`,
   ]
   rangesToClear.forEach(range => sheet.getRange(range).clearContent())
+  
+  // Очищаем новые столбцы героев
+  const proContestRateCol = getColumnIndex(SALES_COLUMNS.PRO_CONTEST_RATE_CURRENT)
+  const proContestRateChangeCol = getColumnIndex(SALES_COLUMNS.PRO_CONTEST_RATE_CHANGE_7D)
+  const pickRateChange24hCol = getColumnIndex(SALES_COLUMNS.PICK_RATE_CHANGE_IMMORTAL_24H)
+  const metaSignalCol = getColumnIndex(SALES_COLUMNS.META_SIGNAL)
+  
+  if (lastRow > 1) {
+    sheet.getRange(proContestRateCol, 2, 1, lastRow - 1).clearContent()
+    sheet.getRange(proContestRateChangeCol, 2, 1, lastRow - 1).clearContent()
+    sheet.getRange(pickRateChange24hCol, 2, 1, lastRow - 1).clearContent()
+    sheet.getRange(metaSignalCol, 2, 1, lastRow - 1).clearContent()
+  }
 
   // ИСПРАВЛЕНИЕ: Синхронизация аналитики убрана отсюда, так как она выполняется в syncPricesFromHistoryToInvestAndSales()
   // Это предотвращает двойную синхронизацию аналитики
@@ -125,6 +138,10 @@ function sales_formatTable() {
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.RECOMMENDATION), COLUMN_WIDTHS.EXTRA_WIDE) // K
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.HERO_TREND), COLUMN_WIDTHS.MEDIUM) // L
   sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.RISK_LEVEL), COLUMN_WIDTHS.MEDIUM) // M
+  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.PRO_CONTEST_RATE_CURRENT), COLUMN_WIDTHS.MEDIUM) // N
+  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.PRO_CONTEST_RATE_CHANGE_7D), COLUMN_WIDTHS.MEDIUM) // O
+  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.PICK_RATE_CHANGE_IMMORTAL_24H), COLUMN_WIDTHS.MEDIUM) // P
+  sheet.setColumnWidth(getColumnIndex(SALES_COLUMNS.META_SIGNAL), COLUMN_WIDTHS.MEDIUM) // Q
 
   if (lastRow > 1) {
     // Дополнительная проверка headers перед использованием
@@ -307,6 +324,10 @@ function sales_calculateAllMetrics() {
   const salesTrends = []
   const volatilityIndices = []
   const heroTrends = []
+  const proContestRates = []
+  const proContestRateChanges = []
+  const pickRateChanges24h = []
+  const metaSignals = []
   const historyNames = historySheet ? historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues() : []
   
   // Рассчитываем метрики для всех строк
@@ -341,6 +362,10 @@ function sales_calculateAllMetrics() {
         salesTrends.push([null])
         volatilityIndices.push([null])
         heroTrends.push([null])
+        proContestRates.push([null])
+        proContestRateChanges.push([null])
+        pickRateChanges24h.push([null])
+        metaSignals.push([null])
         continue
       }
       
@@ -355,6 +380,10 @@ function sales_calculateAllMetrics() {
           salesTrends.push([null])
           volatilityIndices.push([null])
           heroTrends.push([null])
+          proContestRates.push([null])
+          proContestRateChanges.push([null])
+          pickRateChanges24h.push([null])
+          metaSignals.push([null])
           continue
         }
       }
@@ -390,21 +419,56 @@ function sales_calculateAllMetrics() {
         volatilityIndices.push([null])
       }
       
-      // Hero Trend Score (только для Hero Items)
+      // Hero Trend Score и Мета сигнал (только для Hero Items)
       let heroTrendValue = null
+      let proContestRateValue = null
+      let proContestRateChangeValue = null
+      let pickRateChange24hValue = null
+      let metaSignalValue = null
+      
       if (heroId && rankCategory) {
         try {
           const latestStats = heroStats_getLatestStats(heroId, rankCategory)
           if (latestStats) {
             const heroStatsObj = {[rankCategory]: latestStats}
+            
+            // Hero Trend (фундаментальная оценка)
             const heroTrendScore = analytics_calculateHeroTrendScore(heroId, rankCategory, heroStatsObj)
             heroTrendValue = analytics_formatScore(heroTrendScore)
+            
+            // Парсим JSON для получения данных
+            let stats
+            try {
+              stats = typeof latestStats === 'string' ? JSON.parse(latestStats) : latestStats
+            } catch (e) {
+              stats = null
+            }
+            
+            if (stats) {
+              // Pro Contest Rate (текущий) - в процентах
+              proContestRateValue = stats.proContestRate ? stats.proContestRate / 100 : null
+              
+              // Pro Contest Rate Change (7d) - в процентах
+              proContestRateChangeValue = stats.proContestRateChange7d ? stats.proContestRateChange7d / 100 : null
+              
+              // Pick Rate Change Immortal (24h) - в процентах
+              pickRateChange24hValue = stats.pickRateChange24h ? stats.pickRateChange24h / 100 : null
+            }
+            
+            // Мета сигнал (краткосрочный индикатор)
+            const metaSignalScore = analytics_calculateMetaSignal(heroId, rankCategory, heroStatsObj)
+            metaSignalValue = analytics_formatMetaSignal(metaSignalScore)
           }
         } catch (e) {
-          console.error(`Sales: ошибка расчета Hero Trend для "${itemName}":`, e)
+          console.error(`Sales: ошибка расчета Hero Trend/Мета сигнала для "${itemName}":`, e)
         }
       }
+      
       heroTrends.push([heroTrendValue])
+      proContestRates.push([proContestRateValue])
+      proContestRateChanges.push([proContestRateChangeValue])
+      pickRateChanges24h.push([pickRateChange24hValue])
+      metaSignals.push([metaSignalValue])
       
     } catch (e) {
       console.error(`Sales: ошибка обработки строки ${i + 1} в calculateAllMetrics:`, e)
@@ -414,13 +478,21 @@ function sales_calculateAllMetrics() {
       salesTrends.push([null])
       volatilityIndices.push([null])
       heroTrends.push([null])
+      proContestRates.push([null])
+      proContestRateChanges.push([null])
+      pickRateChanges24h.push([null])
+      metaSignals.push([null])
     }
   }
   
-  // Batch-запись Hero Trend (метрики удалены из отображения, но расчеты остаются для Buyback Score)
+  // Batch-запись Hero Trend и новых столбцов
   const count = heroTrends.length
   if (count > 0) {
     sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.HERO_TREND), count, 1).setValues(heroTrends)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.PRO_CONTEST_RATE_CURRENT), count, 1).setValues(proContestRates)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.PRO_CONTEST_RATE_CHANGE_7D), count, 1).setValues(proContestRateChanges)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.PICK_RATE_CHANGE_IMMORTAL_24H), count, 1).setValues(pickRateChanges24h)
+    sheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.META_SIGNAL), count, 1).setValues(metaSignals)
   }
   // Метрики (liquidityScores, demandRatios, priceMomenta, salesTrends, volatilityIndices) 
   // рассчитываются, но не записываются в таблицу - используются только для расчета Buyback Score
@@ -528,7 +600,7 @@ function sales_updateBuybackScores() {
       }
       
       // Рассчитываем Buyback Score
-      let buybackScore = 0.5 // Значение по умолчанию
+      let buybackScore = 50 // Значение по умолчанию (0-100 шкала)
       try {
         buybackScore = analytics_calculateBuybackScore(
           itemData,
@@ -539,14 +611,14 @@ function sales_updateBuybackScores() {
           heroId,
           rankCategory
         )
-        // Валидация Buyback Score
-        if (!Number.isFinite(buybackScore) || buybackScore < 0 || buybackScore > 1) {
+        // Валидация Buyback Score (0-100 шкала)
+        if (!Number.isFinite(buybackScore) || buybackScore < 0 || buybackScore > 100) {
           console.warn(`Sales: некорректный Buyback Score для "${itemName}": ${buybackScore}, используем значение по умолчанию`)
-          buybackScore = 0.5
+          buybackScore = 50
         }
       } catch (e) {
         console.error(`Sales: ошибка расчета Buyback Score для "${itemName}":`, e)
-        buybackScore = 0.5
+        buybackScore = 50
       }
       
       buybackScores.push([analytics_formatScore(buybackScore)])
@@ -597,23 +669,21 @@ function sales_generateRecommendation(row) {
   const buybackScoreStr = String(sheet.getRange(row, getColumnIndex(SALES_COLUMNS.BUYBACK_SCORE)).getValue() || '').trim()
   if (!buybackScoreStr || buybackScoreStr === '—') return '👀 НАБЛЮДАТЬ'
   
-  // Парсим число из формата "🟩 0.93"
+  // Парсим число из формата "🟩 85" (0-100 шкала)
   const scoreMatch = buybackScoreStr.match(/(\d+\.?\d*)/)
   if (!scoreMatch) return '👀 НАБЛЮДАТЬ'
   
   const buybackScore = parseFloat(scoreMatch[1])
   
-  const priceDropPercent = Number(sheet.getRange(row, getColumnIndex(SALES_COLUMNS.PRICE_DROP_PERCENT)).getValue()) || 0
-  
-  if (buybackScore >= 0.75) {
-    return `💰 ОТКУПИТЬ (Score: ${(buybackScore * 100).toFixed(0)}%, Просадка: ${(priceDropPercent * 100).toFixed(1)}%)`
+  if (buybackScore >= 75) {
+    return '💰 ОТКУПИТЬ'
   }
-  if (buybackScore >= 0.60) {
-    return `🟨 РАССМОТРЕТЬ (Score: ${(buybackScore * 100).toFixed(0)}%)`
+  if (buybackScore >= 60) {
+    return '🟨 РАССМОТРЕТЬ'
   }
-  if (buybackScore < 0.40) {
-    return `🟥 НЕ ОТКУПАТЬ (Score: ${(buybackScore * 100).toFixed(0)}%)`
+  if (buybackScore < 40) {
+    return '🟥 НЕ ОТКУПАТЬ'
   }
-  return `👀 НАБЛЮДАТЬ (Score: ${(buybackScore * 100).toFixed(0)}%)`
+  return '👀 НАБЛЮДАТЬ'
 }
 
