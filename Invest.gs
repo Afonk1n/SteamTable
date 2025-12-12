@@ -154,11 +154,19 @@ function invest_updateSinglePrice(row) {
   const priceResult = getHistoryPriceForPeriod_(historySheet, itemName, getCurrentPricePeriod())
   
   if (!priceResult.found) {
+    console.warn(`Invest: цена не найдена в History для "${itemName}"`)
+    return 'error'
+  }
+
+  // ВАЛИДАЦИЯ: Проверяем цену перед использованием
+  const priceValidation = validatePrice_(priceResult.price, itemName)
+  if (!priceValidation.valid) {
+    console.warn(`Invest: некорректная цена для "${itemName}": ${priceResult.price}, ошибка: ${priceValidation.error}`)
     return 'error'
   }
 
   const priceColIndex = getColumnIndex(INVEST_COLUMNS.CURRENT_PRICE)
-  invest_calculateSingle_(sheet, row, priceResult.price)
+  invest_calculateSingle_(sheet, row, priceValidation.price)
   
   if (priceResult.isOutdated) {
     sheet.getRange(row, priceColIndex).setBackground(COLORS.STABLE)
@@ -229,7 +237,15 @@ function invest_formatGoalColumn_(startRow = DATA_START_ROW, endRow = null) {
 function invest_updateCalculations(row, currentPrice) {
   const sheet = getInvestSheet_()
   if (!sheet) return
-  invest_calculateSingle_(sheet, row, currentPrice)
+  
+  // ВАЛИДАЦИЯ: Проверяем цену перед расчетом
+  const priceValidation = validatePrice_(currentPrice, `строка ${row}`)
+  if (!priceValidation.valid) {
+    console.warn(`Invest: некорректная цена для пересчета в строке ${row}: ${currentPrice}`)
+    return
+  }
+  
+  invest_calculateSingle_(sheet, row, priceValidation.price)
 }
 
 // Добавить или обновить позицию в Invest (усреднение цены)
@@ -251,12 +267,26 @@ function invest_addOrUpdatePosition_(name, qtyToAdd, buyPricePerUnit) {
       const period = getCurrentPricePeriod()
       const priceResult = getHistoryPriceForPeriod_(historySheet, name, period)
       if (priceResult && priceResult.found && priceResult.price > 0) {
-        currentPrice = priceResult.price
+        // ВАЛИДАЦИЯ: Проверяем цену перед использованием
+        const priceValidation = validatePrice_(priceResult.price, name)
+        if (priceValidation.valid) {
+          currentPrice = priceValidation.price
+        } else {
+          console.warn(`Invest: некорректная цена для "${name}" при добавлении позиции: ${priceResult.price}`)
+        }
       }
+    }
+    
+    // ВАЛИДАЦИЯ: Проверяем цену покупки перед установкой
+    const buyPriceValidation = validatePrice_(buyPricePerUnit, `${name} (buyPrice)`)
+    if (!buyPriceValidation.valid) {
+      console.warn(`Invest: некорректная цена покупки для "${name}": ${buyPricePerUnit}`)
+      return
     }
     
     // Устанавливаем текущую цену и вычисляем расчёты
     sheet.getRange(target, getColumnIndex(INVEST_COLUMNS.CURRENT_PRICE)).setValue(currentPrice)
+    sheet.getRange(target, getColumnIndex(INVEST_COLUMNS.BUY_PRICE)).setValue(buyPriceValidation.price)
     invest_calculateSingle_(sheet, target, currentPrice)
     
     // Ссылки/картинки
@@ -505,61 +535,113 @@ function invest_calculateAllMetrics() {
   const historyNames = historySheet ? historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues() : []
   
   // Рассчитываем метрики для всех строк
+  const startedAt = Date.now()
+  const MAX_EXECUTION_TIME_MS = 300000 // 5 минут
+  
   for (let i = 0; i < itemNames.length; i++) {
-    const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) {
+    // Проверка таймаута
+    if (Date.now() - startedAt > MAX_EXECUTION_TIME_MS) {
+      console.warn(`Invest: превышено время выполнения calculateAllMetrics (${MAX_EXECUTION_TIME_MS}ms), прервано на строке ${i + 1}`)
+      break
+    }
+    
+    try {
+      const itemName = String(itemNames[i][0] || '').trim()
+      if (!itemName) {
+        liquidityScores.push([null])
+        demandRatios.push([null])
+        priceMomenta.push([null])
+        salesTrends.push([null])
+        volatilityIndices.push([null])
+        heroTrends.push([null])
+        continue
+      }
+      
+      const itemData = itemsData[itemName]
+      if (!itemData) {
+        console.warn(`Invest: нет данных из SteamWebAPI для "${itemName}"`)
+        liquidityScores.push([null])
+        demandRatios.push([null])
+        priceMomenta.push([null])
+        salesTrends.push([null])
+        volatilityIndices.push([null])
+        heroTrends.push([null])
+        continue
+      }
+      
+      // ВАЛИДАЦИЯ: Проверяем валидность цен в itemData
+      if (itemData.pricelatest !== undefined && itemData.pricelatest !== null) {
+        const priceValidation = validatePrice_(itemData.pricelatest, `${itemName} (pricelatest)`)
+        if (!priceValidation.valid) {
+          console.warn(`Invest: некорректная цена pricelatest для "${itemName}": ${itemData.pricelatest}, пропускаем расчет метрик`)
+          liquidityScores.push([null])
+          demandRatios.push([null])
+          priceMomenta.push([null])
+          salesTrends.push([null])
+          volatilityIndices.push([null])
+          heroTrends.push([null])
+          continue
+        }
+      }
+      
+      const mapping = mappings[itemName]
+      const category = mapping ? mapping.category : 'Common Item'
+      const heroId = mapping && mapping.heroId ? mapping.heroId : null
+      const rankCategory = mapping && mapping.heroId ? 'High Rank' : null
+      
+      // Получаем историю цен
+      let historyData = null
+      if (historySheet && historyNames.length > 0) {
+        const historyRowIndex = historyNames.findIndex(r => String(r[0] || '').trim() === itemName)
+        if (historyRowIndex >= 0) {
+          historyData = history_getPriceHistoryForItem_(historySheet, historyRowIndex + DATA_START_ROW)
+        } else {
+          console.warn(`Invest: предмет "${itemName}" не найден в History`)
+        }
+      }
+      
+      // Рассчитываем метрики с обработкой ошибок
+      try {
+        liquidityScores.push([analytics_calculateLiquidityScore(itemData)])
+        demandRatios.push([analytics_calculateDemandRatio(itemData)])
+        priceMomenta.push([analytics_calculatePriceMomentum(itemData, historyData)])
+        salesTrends.push([analytics_calculateSalesTrend(itemData)])
+        volatilityIndices.push([analytics_calculateVolatilityIndex(itemData, historyData)])
+      } catch (e) {
+        console.error(`Invest: ошибка расчета метрик для "${itemName}":`, e)
+        liquidityScores.push([null])
+        demandRatios.push([null])
+        priceMomenta.push([null])
+        salesTrends.push([null])
+        volatilityIndices.push([null])
+      }
+      
+      // Hero Trend Score (только для Hero Items)
+      let heroTrendValue = null
+      if (category === 'Hero Item' && heroId && rankCategory) {
+        try {
+          const latestStats = heroStats_getLatestStats(heroId, rankCategory)
+          if (latestStats) {
+            const heroStatsObj = {[rankCategory]: latestStats}
+            const heroTrendScore = analytics_calculateHeroTrendScore(heroId, rankCategory, heroStatsObj)
+            heroTrendValue = analytics_formatScore(heroTrendScore)
+          }
+        } catch (e) {
+          console.error(`Invest: ошибка расчета Hero Trend для "${itemName}":`, e)
+        }
+      }
+      heroTrends.push([heroTrendValue])
+      
+    } catch (e) {
+      console.error(`Invest: ошибка обработки строки ${i + 1} в calculateAllMetrics:`, e)
+      // В случае ошибки добавляем null значения для всех метрик
       liquidityScores.push([null])
       demandRatios.push([null])
       priceMomenta.push([null])
       salesTrends.push([null])
       volatilityIndices.push([null])
       heroTrends.push([null])
-      continue
     }
-    
-    const itemData = itemsData[itemName]
-    if (!itemData) {
-      liquidityScores.push([null])
-      demandRatios.push([null])
-      priceMomenta.push([null])
-      salesTrends.push([null])
-      volatilityIndices.push([null])
-      heroTrends.push([null])
-      continue
-    }
-    
-    const mapping = mappings[itemName]
-    const category = mapping ? mapping.category : 'Common Item'
-    const heroId = mapping && mapping.heroId ? mapping.heroId : null
-    const rankCategory = mapping && mapping.heroId ? 'High Rank' : null
-    
-    // Получаем историю цен
-    let historyData = null
-    if (historySheet && historyNames.length > 0) {
-      const historyRowIndex = historyNames.findIndex(r => String(r[0] || '').trim() === itemName)
-      if (historyRowIndex >= 0) {
-        historyData = history_getPriceHistoryForItem_(historySheet, historyRowIndex + DATA_START_ROW)
-      }
-    }
-    
-    // Рассчитываем метрики
-    liquidityScores.push([analytics_calculateLiquidityScore(itemData)])
-    demandRatios.push([analytics_calculateDemandRatio(itemData)])
-    priceMomenta.push([analytics_calculatePriceMomentum(itemData, historyData)])
-    salesTrends.push([analytics_calculateSalesTrend(itemData)])
-    volatilityIndices.push([analytics_calculateVolatilityIndex(itemData, historyData)])
-    
-    // Hero Trend Score (только для Hero Items)
-    let heroTrendValue = null
-    if (category === 'Hero Item' && heroId && rankCategory) {
-      const latestStats = heroStats_getLatestStats(heroId, rankCategory)
-      if (latestStats) {
-        const heroStatsObj = {[rankCategory]: latestStats}
-        const heroTrendScore = analytics_calculateHeroTrendScore(heroId, rankCategory, heroStatsObj)
-        heroTrendValue = analytics_formatScore(heroTrendScore)
-      }
-    }
-    heroTrends.push([heroTrendValue])
   }
   
   // Batch-запись Hero Trend (метрики удалены из отображения, но расчеты остаются для Investment Score)
@@ -599,61 +681,120 @@ function invest_updateInvestmentScores() {
   const historyNames = historySheet ? historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historySheet.getLastRow() - HEADER_ROW, 1).getValues() : []
   
   // Рассчитываем Investment Score и Risk Level для всех строк
+  const startedAt = Date.now()
+  const MAX_EXECUTION_TIME_MS = 300000 // 5 минут
+  
   for (let i = 0; i < itemNames.length; i++) {
-    const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) {
+    // Проверка таймаута
+    if (Date.now() - startedAt > MAX_EXECUTION_TIME_MS) {
+      console.warn(`Invest: превышено время выполнения updateInvestmentScores (${MAX_EXECUTION_TIME_MS}ms), прервано на строке ${i + 1}`)
+      break
+    }
+    
+    try {
+      const itemName = String(itemNames[i][0] || '').trim()
+      if (!itemName) {
+        investmentScores.push([null])
+        riskLevels.push([null])
+        continue
+      }
+      
+      const itemData = itemsData[itemName]
+      if (!itemData) {
+        console.warn(`Invest: нет данных из SteamWebAPI для "${itemName}" при расчете Investment Score`)
+        investmentScores.push([null])
+        riskLevels.push([null])
+        continue
+      }
+      
+      // ВАЛИДАЦИЯ: Проверяем валидность цен в itemData
+      if (itemData.pricelatest !== undefined && itemData.pricelatest !== null) {
+        const priceValidation = validatePrice_(itemData.pricelatest, `${itemName} (pricelatest)`)
+        if (!priceValidation.valid) {
+          console.warn(`Invest: некорректная цена pricelatest для "${itemName}": ${itemData.pricelatest}, пропускаем расчет Investment Score`)
+          investmentScores.push([null])
+          riskLevels.push([null])
+          continue
+        }
+      }
+      
+      const mapping = mappings[itemName]
+      const category = mapping ? mapping.category : 'Common Item'
+      const heroId = mapping && mapping.heroId ? mapping.heroId : null
+      const rankCategory = mapping && mapping.heroId ? 'High Rank' : null
+      
+      // Получаем историю цен
+      let historyData = null
+      if (historySheet && historyNames.length > 0) {
+        const historyRowIndex = historyNames.findIndex(r => String(r[0] || '').trim() === itemName)
+        if (historyRowIndex >= 0) {
+          historyData = history_getPriceHistoryForItem_(historySheet, historyRowIndex + DATA_START_ROW)
+        } else {
+          console.warn(`Invest: предмет "${itemName}" не найден в History при расчете Investment Score`)
+        }
+      }
+      
+      // ВАЛИДАЦИЯ: Проверяем наличие критических данных для расчета
+      // Если нет itemData.priceLatest и нет historyData - пропускаем расчет
+      if ((!itemData.pricelatest || itemData.pricelatest <= 0) && (!historyData || !historyData.prices || historyData.prices.length === 0)) {
+        console.warn(`Invest: недостаточно данных для расчета Investment Score для "${itemName}" (нет цен)`)
+        investmentScores.push([null])
+        riskLevels.push([null])
+        continue
+      }
+      
+      // Получаем статистику героя
+      let heroStats = null
+      if (heroId && rankCategory) {
+        try {
+          const latestStats = heroStats_getLatestStats(heroId, rankCategory)
+          if (latestStats) {
+            heroStats = {[rankCategory]: latestStats}
+          }
+        } catch (e) {
+          console.error(`Invest: ошибка получения статистики героя для "${itemName}":`, e)
+        }
+      }
+      
+      // Рассчитываем Investment Score
+      let investmentScore = 0.5 // Значение по умолчанию
+      try {
+        investmentScore = analytics_calculateInvestmentScore(
+          itemData,
+          heroStats,
+          historyData,
+          category,
+          heroId,
+          rankCategory
+        )
+        // Валидация Investment Score
+        if (!Number.isFinite(investmentScore) || investmentScore < 0 || investmentScore > 1) {
+          console.warn(`Invest: некорректный Investment Score для "${itemName}": ${investmentScore}, используем значение по умолчанию`)
+          investmentScore = 0.5
+        }
+      } catch (e) {
+        console.error(`Invest: ошибка расчета Investment Score для "${itemName}":`, e)
+        investmentScore = 0.5
+      }
+      
+      investmentScores.push([analytics_formatScore(investmentScore)])
+      
+      // Рассчитываем Risk Level
+      let riskLevel = 'Medium' // Значение по умолчанию
+      try {
+        const volatilityIndex = analytics_calculateVolatilityIndex(itemData, historyData)
+        const demandRatio = analytics_calculateDemandRatio(itemData)
+        riskLevel = analytics_calculateRiskLevel(investmentScore, volatilityIndex, demandRatio)
+      } catch (e) {
+        console.error(`Invest: ошибка расчета Risk Level для "${itemName}":`, e)
+      }
+      riskLevels.push([riskLevel])
+      
+    } catch (e) {
+      console.error(`Invest: ошибка обработки строки ${i + 1} в updateInvestmentScores:`, e)
       investmentScores.push([null])
       riskLevels.push([null])
-      continue
     }
-    
-    const itemData = itemsData[itemName]
-    if (!itemData) {
-      investmentScores.push([null])
-      riskLevels.push([null])
-      continue
-    }
-    
-    const mapping = mappings[itemName]
-    const category = mapping ? mapping.category : 'Common Item'
-    const heroId = mapping && mapping.heroId ? mapping.heroId : null
-    const rankCategory = mapping && mapping.heroId ? 'High Rank' : null
-    
-    // Получаем историю цен
-    let historyData = null
-    if (historySheet && historyNames.length > 0) {
-      const historyRowIndex = historyNames.findIndex(r => String(r[0] || '').trim() === itemName)
-      if (historyRowIndex >= 0) {
-        historyData = history_getPriceHistoryForItem_(historySheet, historyRowIndex + DATA_START_ROW)
-      }
-    }
-    
-    // Получаем статистику героя
-    let heroStats = null
-    if (heroId && rankCategory) {
-      const latestStats = heroStats_getLatestStats(heroId, rankCategory)
-      if (latestStats) {
-        heroStats = {[rankCategory]: latestStats}
-      }
-    }
-    
-    // Рассчитываем Investment Score
-    const investmentScore = analytics_calculateInvestmentScore(
-      itemData,
-      heroStats,
-      historyData,
-      category,
-      heroId,
-      rankCategory
-    )
-    
-    investmentScores.push([analytics_formatScore(investmentScore)])
-    
-    // Рассчитываем Risk Level
-    const volatilityIndex = analytics_calculateVolatilityIndex(itemData, historyData)
-    const demandRatio = analytics_calculateDemandRatio(itemData)
-    const riskLevel = analytics_calculateRiskLevel(investmentScore, volatilityIndex, demandRatio)
-    riskLevels.push([riskLevel])
   }
   
   // Batch-запись Investment Scores и Risk Levels

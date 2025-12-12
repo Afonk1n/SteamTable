@@ -60,6 +60,46 @@ function parseLocalizedPrice_(raw) {
 }
 
 /**
+ * Валидация цены перед записью
+ * @param {number} price - Цена для проверки
+ * @param {string} itemName - Название предмета (для логирования)
+ * @returns {Object} {valid: boolean, price?: number, error?: string}
+ */
+function validatePrice_(price, itemName = '') {
+  // Проверка на тип данных
+  if (typeof price !== 'number') {
+    console.warn(`Price validation: некорректный тип для "${itemName}": ${typeof price}, значение: ${price}`)
+    return { valid: false, error: 'invalid_type' }
+  }
+  
+  // Проверка на NaN или Infinity
+  if (!Number.isFinite(price)) {
+    console.warn(`Price validation: некорректное значение (NaN/Infinity) для "${itemName}": ${price}`)
+    return { valid: false, error: 'not_finite' }
+  }
+  
+  // Проверка на отрицательные значения
+  if (price < 0) {
+    console.warn(`Price validation: отрицательная цена для "${itemName}": ${price}`)
+    return { valid: false, error: 'negative_price' }
+  }
+  
+  // Проверка на ноль (может быть допустимо, но подозрительно)
+  if (price === 0) {
+    console.warn(`Price validation: нулевая цена для "${itemName}"`)
+    return { valid: false, error: 'zero_price' }
+  }
+  
+  // Проверка на слишком большие значения (аномальные)
+  if (price > MAX_REASONABLE_PRICE) {
+    console.warn(`Price validation: аномально высокая цена для "${itemName}": ${price} (максимум: ${MAX_REASONABLE_PRICE})`)
+    return { valid: false, error: 'price_too_high', price, maxPrice: MAX_REASONABLE_PRICE }
+  }
+  
+  return { valid: true, price }
+}
+
+/**
  * Получает минимальную цену предмета с приоритетом SteamWebAPI.ru и fallback на priceoverview
  * @param {number} appid - ID приложения Steam (570 для Dota 2)
  * @param {string} itemName - Название предмета

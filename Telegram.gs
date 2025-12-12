@@ -232,6 +232,7 @@ function telegram_checkPriceTargets() {
   const recommendations = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), count, 1).getValues()
   const potentials = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.POTENTIAL), count, 1).getValues()
   const maxPrices = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.MAX_PRICE), count, 1).getValues()
+  const investmentScores = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.INVESTMENT_SCORE), count, 1).getValues()
   
   let notificationsSent = 0
   
@@ -247,6 +248,7 @@ function telegram_checkPriceTargets() {
     const recommendation = String(recommendations[i][0] || '').trim()
     const potential = Number(potentials[i][0]) || null
     const maxPrice = Number(maxPrices[i][0]) || null
+    const investmentScore = investmentScores[i][0] || null
     
     if (goal <= 0 || currentPrice <= 0) continue
     
@@ -271,13 +273,13 @@ function telegram_checkPriceTargets() {
     
     // Проверка достижения цели
     if (currentPrice >= goal) {
+      const formattedName = telegram_formatItemNameWithScore_(name, investmentScore)
       const message = `🎯 <b>Цель достигнута!</b>\n\n` +
-        `Предмет: <b>${name}</b>\n` +
+        `Предмет: ${formattedName}\n` +
         `Текущая цена: ${currentPrice.toFixed(2)} ₽\n` +
         `Цель: ${goal.toFixed(2)} ₽\n` +
         `Прибыль: ${profit.toFixed(2)} ₽ (${(profitPercent * 100).toFixed(2)}%)` +
-        potentialInfo + `\n\n` +
-        `Рекомендация: ${recommendation}`
+        potentialInfo
       
       const result = telegram_sendMessage(message)
       if (result.ok) {
@@ -289,13 +291,12 @@ function telegram_checkPriceTargets() {
     // Проверка сильной просадки (50%+)
     if (currentPrice <= goal * 0.5) {
       const dropPercent = ((goal - currentPrice) / goal) * 100
+      const formattedName = telegram_formatItemNameWithScore_(name, investmentScore)
       const message = `📉 <b>Сильная просадка!</b>\n\n` +
-        `Предмет: <b>${name}</b>\n` +
-        `Текущая цена: ${currentPrice.toFixed(2)} ₽\n` +
-        `Цель: ${goal.toFixed(2)} ₽\n` +
+        `Предмет: ${formattedName}\n` +
+        `Текущая цена: ${currentPrice.toFixed(2)} ₽ (макс: ${goal.toFixed(2)} ₽)\n` +
         `Просадка: ${dropPercent.toFixed(2)}%` +
-        potentialInfo + `\n\n` +
-        `Рекомендация: 🟩 КУПИТЬ`
+        potentialInfo
       
       const result = telegram_sendMessage(message)
       if (result.ok) {
@@ -360,6 +361,7 @@ function telegram_checkDailyPriceTargets() {
   const potentials = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.POTENTIAL), count, 1).getValues()
   const maxPrices = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.MAX_PRICE), count, 1).getValues()
   const recommendations = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.RECOMMENDATION), count, 1).getValues()
+  const investmentScores = investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.INVESTMENT_SCORE), count, 1).getValues()
   
   // Собираем позиции, достигшие цели
   const reachedGoal = []
@@ -377,6 +379,7 @@ function telegram_checkDailyPriceTargets() {
     const potential = Number(potentials[i][0]) || null
     const maxPrice = Number(maxPrices[i][0]) || null
     const recommendation = String(recommendations[i][0] || '').trim()
+    const investmentScore = investmentScores[i][0] || null
     
     if (goal <= 0 || currentPrice <= 0) continue
     
@@ -390,7 +393,8 @@ function telegram_checkDailyPriceTargets() {
         profitPercent,
         potential,
         maxPrice,
-        recommendation
+        recommendation,
+        investmentScore
       })
     }
     
@@ -404,7 +408,8 @@ function telegram_checkDailyPriceTargets() {
         dropPercent,
         potential,
         maxPrice,
-        recommendation
+        recommendation,
+        investmentScore
       })
     }
   }
@@ -470,8 +475,9 @@ function telegram_checkDailyPriceTargets() {
     
     strongDrop.forEach((item, index) => {
       const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(item.name)}`
-      message += `${index + 1}. <b><a href="${itemUrl}">${item.name}</a></b>\n`
-      message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (цель: ${item.goal.toFixed(2)} ₽)\n`
+      const formattedName = telegram_formatItemNameWithScore_(item.name, item.investmentScore)
+      message += `${index + 1}. <a href="${itemUrl}">${formattedName}</a>\n`
+      message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (макс: ${item.goal.toFixed(2)} ₽)\n`
       message += `   Просадка: ${item.dropPercent.toFixed(2)}%\n`
       
       // Добавляем информацию о потенциале
@@ -491,14 +497,10 @@ function telegram_checkDailyPriceTargets() {
         message += `\n`
       }
       
-      if (item.recommendation) {
-        message += `   ${item.recommendation}\n`
-      }
       message += `\n`
     })
     
-    message += `Всего: <b>${strongDrop.length}</b> позиций\n\n`
-    message += `Рекомендация: 🟩 КУПИТЬ`
+    message += `Всего: <b>${strongDrop.length}</b> позиций`
     
     const result = telegram_sendMessage(message)
     if (result.ok) {
@@ -816,6 +818,38 @@ function telegram_parseScore_(formattedScore) {
 }
 
 /**
+ * Получает смайлик по значению Investment Score
+ * @param {number} score - Score от 0 до 1
+ * @returns {string} Смайлик (🟢, 🟡, ⚪, 🔴)
+ */
+function telegram_getScoreEmoji_(score) {
+  if (typeof score !== 'number' || isNaN(score)) return '⚪'
+  // Круглые эмодзи: 🟢 (>=0.75), 🟡 (>=0.60), ⚪ (>=0.40), 🔴 (<0.40)
+  return score >= 0.75 ? '🟢' : score >= 0.60 ? '🟡' : score >= 0.40 ? '⚪' : '🔴'
+}
+
+/**
+ * Форматирует название предмета с Investment Score
+ * @param {string} name - Название предмета
+ * @param {number|string|null} investmentScore - Investment Score (число или отформатированная строка)
+ * @returns {string} Отформатированное название с смайликом и скором
+ */
+function telegram_formatItemNameWithScore_(name, investmentScore) {
+  if (!investmentScore && investmentScore !== 0) {
+    return `Предмет: <b>${name}</b>`
+  }
+  
+  // Парсим скор, если это строка
+  let score = typeof investmentScore === 'number' ? investmentScore : telegram_parseScore_(investmentScore)
+  if (score === null) {
+    return `Предмет: <b>${name}</b>`
+  }
+  
+  const emoji = telegram_getScoreEmoji_(score)
+  return `Предмет: <b>${name}</b> ${emoji} ${score.toFixed(2)}`
+}
+
+/**
  * Проверяет Investment Score из History для предметов НЕ в портфеле
  * Отправляет критические уведомления для предметов с Investment Score >= 0.75
  */
@@ -895,15 +929,14 @@ function telegram_checkHistoryInvestmentOpportunities_() {
       ? `\nТренд героя: ${analytics_formatScore(opp.heroTrend)}`
       : ''
     
+    const formattedName = telegram_formatItemNameWithScore_(opp.name, opp.investmentScore)
     const message = `🟢 <b>Отличная возможность для покупки!</b>\n\n` +
-      `Предмет: <b>${opp.name}</b>\n` +
-      `Investment Score: ${analytics_formatScore(opp.investmentScore)}\n` +
+      `Предмет: ${formattedName}\n` +
       `Фаза: ${opp.phase}\n` +
       `Тренд: ${opp.trend}` +
       potentialInfo +
       heroTrendInfo +
-      `\nТекущая цена: ${opp.currentPrice.toFixed(2)} ₽\n\n` +
-      `Рекомендация: 🟩 КУПИТЬ`
+      `\nТекущая цена: ${opp.currentPrice.toFixed(2)} ₽`
     
     const result = telegram_sendMessage(message)
     if (result.ok) {
@@ -1000,15 +1033,14 @@ function telegram_checkSalesBuybackOpportunities_() {
       ? `\nТренд героя: ${analytics_formatScore(opp.heroTrend)}`
       : ''
     
+    const formattedName = telegram_formatItemNameWithScore_(opp.name, opp.buybackScore)
     const message = `💰 <b>Отличный момент для откупа!</b>\n\n` +
-      `Предмет: <b>${opp.name}</b>\n` +
-      `Buyback Score: ${analytics_formatScore(opp.buybackScore)}\n` +
+      `Предмет: ${formattedName}\n` +
       `Уровень риска: ${opp.riskLevel}\n` +
       `Просадка: ${opp.priceDropPercent.toFixed(2)}%\n` +
-      `Цена продажи: ${opp.sellPrice.toFixed(2)} ₽\n` +
+      `Цена продажи: ${opp.sellPrice.toFixed(2)} ₽ (макс: ${opp.sellPrice.toFixed(2)} ₽)\n` +
       `Текущая цена: ${opp.currentPrice.toFixed(2)} ₽` +
-      heroTrendInfo +
-      `\n\nРекомендация: 🟩 ОТКУПИТЬ`
+      heroTrendInfo
     
     const result = telegram_sendMessage(message)
     if (result.ok) {
@@ -1280,17 +1312,12 @@ function telegram_checkPriceChanges_() {
     const changeEmoji = change.changePercent > 0 ? '📈' : '📉'
     const changeType = change.changePercent > 0 ? 'рост' : 'падение'
     
+    const formattedName = telegram_formatItemNameWithScore_(change.name, change.investmentScore)
     let message = `${changeEmoji} <b>Резкое изменение цены!</b>\n\n` +
-      `Предмет: <b>${change.name}</b>\n` +
+      `Предмет: ${formattedName}\n` +
       `Текущая цена: ${change.currentPrice.toFixed(2)} ₽\n` +
       `Цена 24ч назад: ${change.price24hAgo.toFixed(2)} ₽\n` +
-      `${changeType}: <b>${change.changePercent > 0 ? '+' : ''}${change.changePercent.toFixed(2)}%</b>\n`
-    
-    if (change.investmentScore !== null) {
-      message += `Investment Score: ${analytics_formatScore(change.investmentScore)}\n`
-    }
-    
-    message += `\nРекомендация: ${change.changePercent > 0 ? '🟩 КУПИТЬ' : '🟥 ПРОДАТЬ'}`
+      `${changeType}: <b>${change.changePercent > 0 ? '+' : ''}${change.changePercent.toFixed(2)}%</b>`
     
     const result = telegram_sendMessage(message)
     if (result.ok) {

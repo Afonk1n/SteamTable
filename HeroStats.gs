@@ -428,10 +428,20 @@ function heroStats_updateAllStats() {
           const stats7DaysAgo = heroStats_getStats7DaysAgo(heroStat.heroId, 'High Rank')
           
           // Рассчитываем contestRateChange7d
+          // ИСПРАВЛЕНИЕ: Используем contestRatePercent вместо contestRate для расчета изменений
+          // Это предотвращает аномальные значения при делении на очень маленькие абсолютные значения
           let contestRateChange7d = 0
-          if (stats7DaysAgo && stats7DaysAgo.contestRate && stats7DaysAgo.contestRate > 0) {
-            const currentContestRate = heroStat.contestRate || 0
-            contestRateChange7d = ((currentContestRate - stats7DaysAgo.contestRate) / stats7DaysAgo.contestRate) * 100
+          if (stats7DaysAgo && stats7DaysAgo.contestRatePercent !== undefined && stats7DaysAgo.contestRatePercent > 0) {
+            const currentContestRatePercent = heroStat.contestRatePercent || 0
+            contestRateChange7d = ((currentContestRatePercent - stats7DaysAgo.contestRatePercent) / stats7DaysAgo.contestRatePercent) * 100
+            
+            // ВАЛИДАЦИЯ: Ограничиваем изменения разумными пределами (-1000% до +1000%)
+            const MAX_CHANGE_PERCENT = 1000
+            const MIN_CHANGE_PERCENT = -1000
+            if (contestRateChange7d > MAX_CHANGE_PERCENT || contestRateChange7d < MIN_CHANGE_PERCENT) {
+              console.warn(`HeroStats: аномальное изменение contestRate для героя ${heroStat.heroId} (High Rank): ${contestRateChange7d.toFixed(2)}% (ограничено)`)
+              contestRateChange7d = contestRateChange7d > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
+            }
           }
           
           // Рассчитываем proContestRateChange7d
@@ -439,6 +449,14 @@ function heroStats_updateAllStats() {
           const currentProContestRate = heroStat.proContestRate || 0
           if (stats7DaysAgo && stats7DaysAgo.proContestRate && stats7DaysAgo.proContestRate > 0) {
             proContestRateChange7d = ((currentProContestRate - stats7DaysAgo.proContestRate) / stats7DaysAgo.proContestRate) * 100
+            
+            // ВАЛИДАЦИЯ: Ограничиваем изменения разумными пределами
+            const MAX_CHANGE_PERCENT = 1000
+            const MIN_CHANGE_PERCENT = -1000
+            if (proContestRateChange7d > MAX_CHANGE_PERCENT || proContestRateChange7d < MIN_CHANGE_PERCENT) {
+              console.warn(`HeroStats: аномальное изменение proContestRate для героя ${heroStat.heroId} (High Rank): ${proContestRateChange7d.toFixed(2)}% (ограничено)`)
+              proContestRateChange7d = proContestRateChange7d > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
+            }
           }
           
           const statsData = {
@@ -481,10 +499,19 @@ function heroStats_updateAllStats() {
           const stats7DaysAgo = heroStats_getStats7DaysAgo(heroStat.heroId, 'All Ranks')
           
           // Рассчитываем contestRateChange7d
+          // ИСПРАВЛЕНИЕ: Используем contestRatePercent вместо contestRate для расчета изменений
           let contestRateChange7d = 0
-          if (stats7DaysAgo && stats7DaysAgo.contestRate && stats7DaysAgo.contestRate > 0) {
-            const currentContestRate = heroStat.contestRate || 0
-            contestRateChange7d = ((currentContestRate - stats7DaysAgo.contestRate) / stats7DaysAgo.contestRate) * 100
+          if (stats7DaysAgo && stats7DaysAgo.contestRatePercent !== undefined && stats7DaysAgo.contestRatePercent > 0) {
+            const currentContestRatePercent = heroStat.contestRatePercent || 0
+            contestRateChange7d = ((currentContestRatePercent - stats7DaysAgo.contestRatePercent) / stats7DaysAgo.contestRatePercent) * 100
+            
+            // ВАЛИДАЦИЯ: Ограничиваем изменения разумными пределами (-1000% до +1000%)
+            const MAX_CHANGE_PERCENT = 1000
+            const MIN_CHANGE_PERCENT = -1000
+            if (contestRateChange7d > MAX_CHANGE_PERCENT || contestRateChange7d < MIN_CHANGE_PERCENT) {
+              console.warn(`HeroStats: аномальное изменение contestRate для героя ${heroStat.heroId} (All Ranks): ${contestRateChange7d.toFixed(2)}% (ограничено)`)
+              contestRateChange7d = contestRateChange7d > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
+            }
           }
           
           // Рассчитываем proContestRateChange7d
@@ -492,6 +519,14 @@ function heroStats_updateAllStats() {
           const currentProContestRate = heroStat.proContestRate || 0
           if (stats7DaysAgo && stats7DaysAgo.proContestRate && stats7DaysAgo.proContestRate > 0) {
             proContestRateChange7d = ((currentProContestRate - stats7DaysAgo.proContestRate) / stats7DaysAgo.proContestRate) * 100
+            
+            // ВАЛИДАЦИЯ: Ограничиваем изменения разумными пределами
+            const MAX_CHANGE_PERCENT = 1000
+            const MIN_CHANGE_PERCENT = -1000
+            if (proContestRateChange7d > MAX_CHANGE_PERCENT || proContestRateChange7d < MIN_CHANGE_PERCENT) {
+              console.warn(`HeroStats: аномальное изменение proContestRate для героя ${heroStat.heroId} (All Ranks): ${proContestRateChange7d.toFixed(2)}% (ограничено)`)
+              proContestRateChange7d = proContestRateChange7d > 0 ? MAX_CHANGE_PERCENT : MIN_CHANGE_PERCENT
+            }
           }
           
           const statsData = {

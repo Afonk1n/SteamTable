@@ -121,28 +121,14 @@ function steamWebAPI_getItemData(itemName, game = 'dota2') {
     }
   }
   
-  // Если не нашли через основной endpoint, пробуем fallback на item_by_nameid
-  // API автоматически определяет NameID из Market Hash Name
-  console.log(`SteamWebAPI: предмет "${itemName}" не найден через основной endpoint, пробуем item_by_nameid`)
-  const fallbackResult = steamWebAPI_fetchItemByNameIdViaName(itemName, game)
-  
-  if (fallbackResult.ok && fallbackResult.item) {
-    const item = fallbackResult.item
-    const price = item.pricelatest || item.price || null
-    
-    console.log(`SteamWebAPI: предмет "${itemName}" найден через item_by_nameid`)
-    return {
-      ok: true,
-      price: price,
-      data: item
-    }
-  }
-  
-  // Если и fallback не помог, возвращаем ошибку
+  // Если не нашли через основной endpoint, возвращаем ошибку
+  // Примечание: item_by_nameid требует nameid (число), а не name (строку), поэтому fallback не работает
+  // Для предметов, которые не найдены через основной endpoint, нужно либо найти их nameid вручную,
+  // либо использовать другой способ поиска
   return {
     ok: false,
-    error: fallbackResult.error || result.error || 'item_not_found',
-    details: fallbackResult.details || result.details
+    error: result.error || 'item_not_found',
+    details: result.details || 'Item not found via main endpoint'
   }
 }
 
@@ -318,29 +304,10 @@ function steamWebAPI_fetchItemsBatch(itemNames, game = 'dota2', useFallback = tr
     }
   }
   
-  // Если включен fallback, пробуем найти не найденные предметы через item_by_nameid
-  if (useFallback && notFoundItems.length > 0) {
-    console.log(`SteamWebAPI: ${notFoundItems.length} предметов не найдено через основной endpoint, пробуем fallback`)
-    
-    for (const itemName of notFoundItems) {
-      try {
-        const fallbackResult = steamWebAPI_fetchItemByNameIdViaName(itemName, game)
-        if (fallbackResult.ok && fallbackResult.item) {
-          const item = fallbackResult.item
-          const key = item.normalizedname || item.marketname || item.markethashname
-          if (key) {
-            result[key.toLowerCase()] = item
-            console.log(`SteamWebAPI: предмет "${itemName}" найден через fallback`)
-          }
-        }
-      } catch (e) {
-        console.warn(`SteamWebAPI: ошибка fallback для "${itemName}":`, e.message)
-      }
-      
-      // Небольшая задержка между fallback запросами
-      Utilities.sleep(LIMITS.BASE_DELAY_MS)
-    }
-  }
+  // Примечание: item_by_nameid требует nameid (число), а не name (строку), поэтому fallback не работает
+  // Для предметов, которые не найдены через основной endpoint, нужно либо найти их nameid вручную,
+  // либо использовать другой способ поиска
+  // Fallback отключен, так как API не поддерживает поиск по имени через item_by_nameid
   
   return {
     ok: errors.length === 0,

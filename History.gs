@@ -324,10 +324,19 @@ function history_updatePricesForPeriod(period) {
         timeBudgetMs: 330000,
         startedAt,
       })
-      if (res && res.ok) {
-        periodVals[i][0] = res.price
-        statusVals[i][0] = STATUS.OK
-        updatedCount++
+      if (res && res.ok && res.price !== undefined) {
+        // ВАЛИДАЦИЯ: Проверяем цену перед записью
+        const validation = validatePrice_(res.price, name)
+        if (validation.valid) {
+          periodVals[i][0] = validation.price
+          statusVals[i][0] = STATUS.OK
+          updatedCount++
+        } else {
+          // Цена не прошла валидацию - не записываем и отмечаем как ошибку
+          console.error(`History: цена не прошла валидацию для "${name}": ${validation.error}, цена: ${res.price}`)
+          statusVals[i][0] = STATUS.WARNING
+          errorCount++
+        }
       } else {
         statusVals[i][0] = STATUS.WARNING
         errorCount++
@@ -391,10 +400,18 @@ function history_updateSinglePrice(row, col) {
 
   try {
     const res = fetchLowestPrice_(HISTORY_CONFIG.STEAM_APPID, name)
-    if (res.ok) {
-      sheet.getRange(row, col).setValue(res.price)
-      sheet.getRange(`${HISTORY_CONFIG.COLUMNS.STATUS}${row}`).setValue('✓')
-      return 'updated'
+    if (res.ok && res.price !== undefined) {
+      // ВАЛИДАЦИЯ: Проверяем цену перед записью
+      const validation = validatePrice_(res.price, name)
+      if (validation.valid) {
+        sheet.getRange(row, col).setValue(validation.price)
+        sheet.getRange(`${HISTORY_CONFIG.COLUMNS.STATUS}${row}`).setValue('✓')
+        return 'updated'
+      } else {
+        console.error(`History: цена не прошла валидацию для "${name}": ${validation.error}, цена: ${res.price}`)
+        sheet.getRange(`${HISTORY_CONFIG.COLUMNS.STATUS}${row}`).setValue('⚠️')
+        return 'error'
+      }
     }
     sheet.getRange(`${HISTORY_CONFIG.COLUMNS.STATUS}${row}`).setValue('❌')
     return 'error'
@@ -1236,13 +1253,31 @@ function history_updateTrends() {
     : []
 
   let updatedCount = 0
+  let skippedCount = 0
+  let errorCount = 0
+  const startedAt = Date.now()
+  const MAX_EXECUTION_TIME_MS = 300000 // 5 минут
+  const MAX_ROW_PROCESSING_TIME_MS = 5000 // Максимум 5 секунд на одну строку
   
   // Анализируем тренды для всех строк
   for (let i = 0; i < count; i++) {
+    // Проверка общего таймаута
+    if (Date.now() - startedAt > MAX_EXECUTION_TIME_MS) {
+      console.warn(`History: превышено время выполнения updateTrends (${MAX_EXECUTION_TIME_MS}ms), прервано на строке ${i + 1}`)
+      break
+    }
+    
+    const rowStartTime = Date.now()
     const name = String(names[i][0] || '').trim()
-    if (!name) continue
+    if (!name) {
+      skippedCount++
+      continue
+    }
     
     const row = i + 2
+    
+    // Обрабатываем каждую строку в try-catch для защиты от зависания на проблемных данных
+    try {
     
     // ОПТИМИЗАЦИЯ: Используем уже прочитанные данные вместо отдельных запросов
     const pricesByDate = new Map()
@@ -1254,7 +1289,14 @@ function history_updateTrends() {
       for (let j = 0; j < priceDataWidth; j++) {
         const value = allPriceData[i][j]
         const headerDisplay = allHeaders[j]
+        // ВАЛИДАЦИЯ: Проверяем цену перед добавлением
         if (typeof value === 'number' && !isNaN(value) && value > 0 && headerDisplay) {
+          const priceValidation = validatePrice_(value, `${name} (колонка ${firstDateCol + j})`)
+          if (!priceValidation.valid) {
+            console.warn(`History: пропущена некорректная цена для "${name}" в колонке ${firstDateCol + j}: ${value}`)
+            continue // Пропускаем эту цену
+          }
+          
           const headerStr = String(headerDisplay).trim()
           const dateMatch = headerStr.match(/^(\d{2}\.\d{2}\.\d{2})/)
           if (dateMatch) {
@@ -1262,7 +1304,7 @@ function history_updateTrends() {
             const col = firstDateCol + j
             priceEntries.push({
               dateKey,
-              value,
+              value: priceValidation.price, // Используем валидированную цену
               col
             })
             if (!dateHeaders.includes(dateKey)) {
@@ -1307,7 +1349,14 @@ function history_updateTrends() {
     for (const dateKey of sortedDateKeys) {
       const price = pricesByDate.get(dateKey)
       if (price) {
-        prices.push(price)
+        // Дополнительная валидация перед добавлением (на случай, если валидация была пропущена ранее)
+        const priceValidation = validatePrice_(price, `${name} (${dateKey})`)
+        if (!priceValidation.valid) {
+          console.warn(`History: пропущена некорректная цена для "${name}" за ${dateKey}: ${price}`)
+          continue
+        }
+        
+        prices.push(priceValidation.price)
         // Преобразуем строку даты в объект Date для расчета разницы
         // Используем полдень (12:00) для избежания проблем с часовыми поясами
         const dateParts = dateKey.split('.')
@@ -1325,6 +1374,28 @@ function history_updateTrends() {
     // Проверка: количество цен и дат должно совпадать
     if (prices.length !== dates.length) {
       console.warn(`History: несоответствие количества цен (${prices.length}) и дат (${dates.length}) для строки ${row}`)
+    }
+    
+    // ВАЛИДАЦИЯ: Проверяем достаточность данных для анализа
+    if (prices.length < 2) {
+      console.warn(`History: недостаточно данных для анализа тренда для "${name}" (${prices.length} цен)`)
+      trends[i][0] = '❓'
+      phases[i][0] = '❓'
+      potentials[i][0] = null
+      recommendations[i][0] = '👀 НАБЛЮДАТЬ'
+      skippedCount++
+      continue
+    }
+    
+    // Проверка таймаута обработки строки
+    if (Date.now() - rowStartTime > MAX_ROW_PROCESSING_TIME_MS) {
+      console.warn(`History: превышено время обработки строки ${row} ("${name}") - ${MAX_ROW_PROCESSING_TIME_MS}ms, пропускаем`)
+      trends[i][0] = '❓'
+      phases[i][0] = '❓'
+      potentials[i][0] = null
+      recommendations[i][0] = '❓ ТАЙМАУТ'
+      skippedCount++
+      continue
     }
     
     // ОПТИМИЗАЦИЯ: Анализируем тренд используя уже собранные данные (без дополнительных запросов к таблице)
@@ -1371,6 +1442,17 @@ function history_updateTrends() {
     }
     
     updatedCount++
+    } catch (e) {
+      // Обработка ошибок для строк с пропущенными значениями (SteamWebAPI не обрабатывает некоторые новые предметы)
+      console.error(`History: ошибка при обработке строки ${row} (${name}):`, e.message)
+      errorCount++
+      // Устанавливаем значения по умолчанию для проблемных строк
+      trends[i][0] = '❓'
+      phases[i][0] = '❓'
+      potentials[i][0] = null
+      recommendations[i][0] = '❓ ОШИБКА'
+      // Продолжаем обработку следующих строк
+    }
   }
   
   // Batch обновление всех данных за одну операцию
@@ -1383,7 +1465,7 @@ function history_updateTrends() {
   // Применяем все правила условного форматирования (тренды + аналитика)
   history_applyAllConditionalFormatting_(sheet)
   
-  console.log(`History: обновлено трендов: ${updatedCount}`)
+  console.log(`History: обновлено трендов: ${updatedCount}, пропущено: ${skippedCount}, ошибок: ${errorCount}`)
   
   try {
     SpreadsheetApp.getUi().alert(
@@ -1394,6 +1476,169 @@ function history_updateTrends() {
   } catch (e) {
     console.log('History: невозможно показать UI в данном контексте')
   }
+}
+
+/**
+ * Нормализует формат цен во всех колонках с датами
+ * Конвертирует текстовые значения вида "39,99 ₽" в числа и применяет единый формат
+ */
+function history_normalizePriceFormats() {
+  const sheet = getOrCreateHistorySheet_()
+  const lastRow = sheet.getLastRow()
+  const lastCol = sheet.getLastColumn()
+  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
+  
+  if (lastRow <= 1 || lastCol < firstDateCol) {
+    SpreadsheetApp.getUi().alert('Нет данных для нормализации')
+    return
+  }
+  
+  const dateColsCount = lastCol - firstDateCol + 1
+  const dataRowsCount = lastRow - 1
+  
+  let convertedCount = 0
+  let errorCount = 0
+  
+  // Обрабатываем каждую колонку с датами
+  for (let col = firstDateCol; col <= lastCol; col++) {
+    const values = sheet.getRange(DATA_START_ROW, col, dataRowsCount, 1).getValues()
+    const displayValues = sheet.getRange(DATA_START_ROW, col, dataRowsCount, 1).getDisplayValues()
+    const newValues = []
+    let hasChanges = false
+    
+    for (let i = 0; i < values.length; i++) {
+      const value = values[i][0]
+      const displayValue = String(displayValues[i][0] || '').trim()
+      
+      // Если значение пустое - оставляем пустым
+      if (!value && !displayValue) {
+        newValues.push([''])
+        continue
+      }
+      
+      // Проверяем, нужно ли конвертировать значение
+      // Конвертируем если: displayValue содержит запятую с цифрами после (десятичный разделитель) или знак рубля
+      // ИЛИ value - строка, которую можно распарсить
+      const hasDecimalComma = displayValue.match(/,\d{1,2}(\s*₽)?$/) // Запятая с 1-2 цифрами после (десятичный разделитель)
+      const hasRuble = displayValue.includes('₽')
+      const isStringValue = typeof value === 'string' && value.trim().length > 0
+      
+      // Если значение уже число и displayValue не содержит признаков текстового формата - оставляем как есть
+      if (typeof value === 'number' && !isNaN(value) && value > 0 && !hasDecimalComma && !hasRuble) {
+        newValues.push([value])
+        continue
+      }
+      
+      // Если значение требует конвертации (текстовый формат "39,99 ₽" или строка) - конвертируем
+      if (hasDecimalComma || hasRuble || isStringValue) {
+        try {
+          // Используем displayValue для парсинга, так как он содержит реальное отображение
+          let cleanValue = displayValue
+          
+          // Убираем знак рубля и пробелы
+          cleanValue = cleanValue.replace(/₽/g, '').replace(/\s+/g, '').trim()
+          
+          // Заменяем запятую на точку для десятичных (российский формат "39,99" -> "39.99")
+          cleanValue = cleanValue.replace(',', '.')
+          
+          // Убираем все нечисловые символы кроме точки и минуса
+          cleanValue = cleanValue.replace(/[^\d.-]/g, '')
+          
+          const numValue = parseFloat(cleanValue)
+          
+          // ВАЛИДАЦИЯ: Проверяем конвертированное значение
+          if (!isNaN(numValue) && isFinite(numValue)) {
+            const validation = validatePrice_(numValue, `колонка ${col}, строка ${i + DATA_START_ROW}`)
+            if (validation.valid) {
+              // Убеждаемся, что записываем именно число, а не строку
+              newValues.push([Number(validation.price)])
+              hasChanges = true
+              convertedCount++
+            } else {
+              // Цена не прошла валидацию - очищаем ячейку или оставляем пустой
+              console.warn(`History: цена не прошла валидацию при нормализации: ${validation.error}, значение: ${numValue}`)
+              newValues.push([''])
+              hasChanges = true
+              errorCount++
+            }
+          } else {
+            // Не удалось конвертировать - оставляем как есть
+            newValues.push([value])
+          }
+        } catch (e) {
+          console.error(`History: ошибка конвертации значения в колонке ${col}, строка ${i + DATA_START_ROW}:`, e)
+          newValues.push([value])
+          errorCount++
+        }
+      } else {
+        // Значение не требует конвертации - оставляем как есть
+        newValues.push([value])
+      }
+    }
+    
+    // Записываем конвертированные значения, если были изменения
+    if (hasChanges) {
+      const range = sheet.getRange(DATA_START_ROW, col, dataRowsCount, 1)
+      // Сначала применяем формат, чтобы Google Sheets правильно интерпретировал числа
+      range.setNumberFormat('#,##0.00 ₽')
+      // Затем записываем значения как числа
+      range.setValues(newValues)
+      // Применяем выравнивание
+      range.setHorizontalAlignment('center')
+      range.setVerticalAlignment('middle')
+    } else {
+      // Даже если изменений не было, убеждаемся, что формат применен
+      history_formatPriceColumn_(sheet, col)
+    }
+  }
+  
+  // Применяем форматирование ко всем колонкам дат одним batch-запросом для единообразия
+  // Это гарантирует, что все ячейки имеют правильный формат, даже если они не были изменены
+  history_formatAllDateColumns_(sheet)
+  
+  // Проверяем результат: берем несколько примеров для демонстрации
+  let examples = []
+  let exampleCount = 0
+  const maxExamples = 3
+  
+  if (convertedCount > 0) {
+    // Берем первую колонку с датами и проверяем первые несколько строк
+    const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL
+    const checkRows = Math.min(20, dataRowsCount)
+    const sampleValues = sheet.getRange(DATA_START_ROW, firstDateCol, checkRows, 1).getValues()
+    const sampleDisplay = sheet.getRange(DATA_START_ROW, firstDateCol, checkRows, 1).getDisplayValues()
+    
+    for (let i = 0; i < checkRows && exampleCount < maxExamples; i++) {
+      const val = sampleValues[i][0]
+      const display = String(sampleDisplay[i][0] || '').trim()
+      if (val && typeof val === 'number' && val > 0 && display) {
+        examples.push(`"${display}" → число ${val.toFixed(2)}`)
+        exampleCount++
+      }
+    }
+  }
+  
+  let message = `Нормализация завершена:\n` +
+    `• Конвертировано значений: ${convertedCount}\n` +
+    `• Ошибок: ${errorCount}\n` +
+    `• Колонок обработано: ${dateColsCount}`
+  
+  if (examples.length > 0) {
+    message += `\n\nПримеры конвертации:\n${examples.join('\n')}`
+    message += `\n\n✅ ВАЖНО: Визуально значения выглядят так же, но теперь это ЧИСЛА, а не текст!`
+    message += `\n\nДо: текст "39,99 ₽" (нельзя использовать в формулах)`
+    message += `\nПосле: число 39.99 с форматом валюты (можно использовать в формулах)`
+    message += `\n\nТеперь все цены в том же формате, что и от SteamWebAPI (числа).`
+  } else if (convertedCount > 0) {
+    message += `\n\n✅ Значения конвертированы из текста в числа.`
+    message += `\nТеперь они в том же формате, что и цены от SteamWebAPI (числа, а не текст).`
+    message += `\nВизуально они выглядят так же, но теперь их можно использовать в формулах.`
+  } else {
+    message += `\n\nℹ️ Все значения уже были в правильном формате (числа).`
+  }
+  
+  console.log(`History: ${message}`)
+  SpreadsheetApp.getUi().alert('Нормализация формата цен', message, SpreadsheetApp.getUi().ButtonSet.OK)
 }
 
 // Убедиться что колонки для расширенной аналитики существуют (K, L, J)
@@ -1645,10 +1890,11 @@ function history_syncHeroStats() {
           heroNames.push([heroData.heroName || ''])
           heroTrends.push([analytics_formatScore(heroTrendScore)])
           contestRateChanges.push([stats.contestRateChange7d || 0])
-          // Используем проценты, если доступны, иначе абсолютные числа
-          contestRates.push([stats.contestRatePercent !== undefined ? stats.contestRatePercent : (stats.contestRate || 0)])
-          pickRates.push([stats.pickRatePercent !== undefined ? stats.pickRatePercent : (stats.pickRate || 0)])
-          winRates.push([stats.winRate || 0])
+          // ВАЖНО: contestRatePercent и pickRatePercent уже в формате доли (0.0518 = 5.18%), НЕ нужно делить на 100
+          // winRate уже в процентах (52.02 = 52.02%), формат процента в Google Sheets умножает на 100, поэтому делим на 100
+          contestRates.push([stats.contestRatePercent !== undefined ? stats.contestRatePercent : 0])
+          pickRates.push([stats.pickRatePercent !== undefined ? stats.pickRatePercent : 0])
+          winRates.push([stats.winRate ? stats.winRate / 100 : 0])
         } catch (e) {
           console.log(`Ошибка при подготовке статистики для ${itemName}: ${e.message}`)
           heroNames.push([''])

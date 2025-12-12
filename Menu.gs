@@ -141,6 +141,8 @@ function onOpen() {
       .addItem('Дубли названий', 'history_findDuplicates')
       .addItem('Создать столбец текущего периода', 'history_ensureTodayColumn')
       .addSeparator()
+      .addItem('Нормализовать формат цен в колонках дат', 'history_normalizePriceFormats')
+      .addSeparator()
       .addItem('Синхронизировать статистику героев', 'history_syncHeroStats')
       .addItem('Обновить Investment Scores', 'history_updateInvestmentScores')
     )
@@ -194,6 +196,8 @@ function initializeAllTables() {
     // Создаем листы логов, если их еще нет
     getOrCreateAutoLogSheet_()
     getOrCreateLogSheet_()
+    // Создаем лист TelegramNotifications, если его еще нет
+    getOrCreateTelegramNotificationsSheet_()
     console.log('Menu: все таблицы инициализированы и отформатированы')
   } catch (e) {
     console.error('Menu: ошибка инициализации таблиц:', e)
@@ -571,23 +575,37 @@ function checkSystemReadiness() {
     try {
       const historySheet = getHistorySheet_()
       if (historySheet && historySheet.getLastRow() >= DATA_START_ROW) {
-        const minCol = getColumnIndex(HISTORY_COLUMNS.MIN)
-        const maxCol = getColumnIndex(HISTORY_COLUMNS.MAX)
-        const minMaxValues = historySheet.getRange(DATA_START_ROW, minCol, historySheet.getLastRow() - HEADER_ROW, 2).getValues()
+        const minCol = getColumnIndex(HISTORY_COLUMNS.MIN_PRICE)
+        const maxCol = getColumnIndex(HISTORY_COLUMNS.MAX_PRICE)
         
-        const filledCount = minMaxValues.filter(row => row[0] && row[1] && row[0] !== '' && row[1] !== '').length
-        const totalCount = minMaxValues.length
-        const fillPercentage = totalCount > 0 ? (filledCount / totalCount * 100).toFixed(0) : 0
-        
-        if (fillPercentage >= 80) {
-          checks.minMaxFilled = true
-          report += `✅ Min/Max: заполнено ${fillPercentage}% (${filledCount}/${totalCount})\n`
+        if (!minCol || !maxCol) {
+          report += `❌ Min/Max: не найдены колонки (Min: ${minCol}, Max: ${maxCol})\n`
         } else {
-          report += `⚠️ Min/Max: заполнено только ${fillPercentage}% (${filledCount}/${totalCount})\n`
+          const rowCount = historySheet.getLastRow() - HEADER_ROW
+          const minMaxValues = historySheet.getRange(DATA_START_ROW, minCol, rowCount, 2).getValues()
+          
+          const filledCount = minMaxValues.filter(row => {
+            const minVal = row[0]
+            const maxVal = row[1]
+            return minVal !== null && minVal !== '' && !isNaN(Number(minVal)) && Number(minVal) > 0 &&
+                   maxVal !== null && maxVal !== '' && !isNaN(Number(maxVal)) && Number(maxVal) > 0
+          }).length
+          const totalCount = minMaxValues.length
+          const fillPercentage = totalCount > 0 ? (filledCount / totalCount * 100).toFixed(0) : 0
+          
+          if (fillPercentage >= 80) {
+            checks.minMaxFilled = true
+            report += `✅ Min/Max: заполнено ${fillPercentage}% (${filledCount}/${totalCount})\n`
+          } else {
+            report += `⚠️ Min/Max: заполнено только ${fillPercentage}% (${filledCount}/${totalCount})\n`
+          }
         }
+      } else {
+        report += `❌ Min/Max: нет данных в History\n`
       }
     } catch (e) {
-      report += `❌ Min/Max: ошибка проверки\n`
+      console.error('checkSystemReadiness: ошибка проверки Min/Max:', e)
+      report += `❌ Min/Max: ошибка проверки (${e.message})\n`
     }
     
     // Проверка 3: HeroMapping существует и содержит данные
@@ -607,21 +625,35 @@ function checkSystemReadiness() {
     // Проверка 4: HeroStats содержит данные
     try {
       const heroStatsSheet = getHeroStatsSheet_()
-      if (heroStatsSheet && heroStatsSheet.getLastRow() >= DATA_START_ROW) {
-        // Проверяем наличие колонок с данными (после колонки C)
+      if (heroStatsSheet) {
+        const lastRow = heroStatsSheet.getLastRow()
         const lastCol = heroStatsSheet.getLastColumn()
-        if (lastCol > HERO_STATS_COLUMNS.FIRST_DATA_COL) {
-          checks.heroStatsExists = true
-          const statsCount = (heroStatsSheet.getLastRow() - HEADER_ROW) / 2 // Две строки на героя
-          report += `✅ HeroStats: ${statsCount} героев, ${lastCol - HERO_STATS_COLUMNS.FIRST_DATA_COL} записей\n`
-        } else {
-          report += `⚠️ HeroStats: нет записей статистики\n`
+        const firstDataCol = HERO_STATS_COLUMNS.FIRST_DATA_COL
+        
+        if (lastRow >= DATA_START_ROW && lastCol > firstDataCol) {
+          // Проверяем, есть ли хотя бы одна непустая ячейка в колонках с данными
+          const hasData = heroStatsSheet.getRange(DATA_START_ROW, firstDataCol, lastRow - HEADER_ROW, lastCol - firstDataCol + 1).getValues()
+            .some(row => row.some(cell => cell !== null && cell !== ''))
+          
+          if (hasData) {
+            checks.heroStatsExists = true
+            const statsCount = lastRow - HEADER_ROW // Общее количество строк (может быть нечетным)
+            const recordsCount = lastCol - firstDataCol + 1
+            report += `✅ HeroStats: ${statsCount} строк, ${recordsCount} записей статистики\n`
+          } else {
+            report += `⚠️ HeroStats: лист существует, но нет записей статистики\n`
+          }
+        } else if (lastRow < DATA_START_ROW) {
+          report += `❌ HeroStats: нет данных (лист пуст)\n`
+        } else if (lastCol <= firstDataCol) {
+          report += `⚠️ HeroStats: нет записей статистики (только заголовки)\n`
         }
       } else {
-        report += `❌ HeroStats: нет данных\n`
+        report += `❌ HeroStats: лист не найден\n`
       }
     } catch (e) {
-      report += `❌ HeroStats: ошибка проверки\n`
+      console.error('checkSystemReadiness: ошибка проверки HeroStats:', e)
+      report += `❌ HeroStats: ошибка проверки (${e.message})\n`
     }
     
     // Проверка 5: Триггеры включены
@@ -661,6 +693,100 @@ function checkSystemReadiness() {
   } catch (e) {
     console.error('checkSystemReadiness: ошибка:', e)
     ui.alert('Ошибка', 'Не удалось проверить готовность системы: ' + e.message, ui.ButtonSet.OK)
+  }
+}
+
+/**
+ * Проверка состояния автоматизации
+ * Показывает активные триггеры и последние выполнения операций
+ */
+function checkAutomationStatus() {
+  const ui = SpreadsheetApp.getUi()
+  
+  try {
+    let report = '🤖 ПРОВЕРКА СОСТОЯНИЯ АВТОМАТИЗАЦИИ\n\n'
+    
+    // Проверка триггеров
+    try {
+      const triggers = ScriptApp.getProjectTriggers()
+      if (triggers.length === 0) {
+        report += '❌ Триггеры: не включены\n'
+        report += '\n💡 Используйте: SteamTable → Включить автообновление\n'
+      } else {
+        report += `✅ Триггеры: ${triggers.length} активных\n\n`
+        
+        // Группируем триггеры по функциям
+        const triggerGroups = {}
+        triggers.forEach(trigger => {
+          const handler = trigger.getHandlerFunction()
+          if (!triggerGroups[handler]) {
+            triggerGroups[handler] = []
+          }
+          triggerGroups[handler].push(trigger)
+        })
+        
+        // Показываем информацию о каждом типе триггера
+        for (const [handler, triggerList] of Object.entries(triggerGroups)) {
+          const count = triggerList.length
+          const firstTrigger = triggerList[0]
+          
+          let schedule = ''
+          if (firstTrigger.getEventType() === ScriptApp.EventType.CLOCK) {
+            const timeBased = firstTrigger.getTimeBasedTriggerSource()
+            if (timeBased === ScriptApp.TimeBasedTriggerSource.CLOCK) {
+              schedule = 'по расписанию'
+            } else if (timeBased === ScriptApp.TimeBasedTriggerSource.MINUTES) {
+              const everyMinutes = firstTrigger.getEveryMinutes()
+              schedule = `каждые ${everyMinutes} минут`
+            } else if (timeBased === ScriptApp.TimeBasedTriggerSource.HOURS) {
+              const everyHours = firstTrigger.getEveryHours()
+              schedule = `каждые ${everyHours} часов`
+            } else if (timeBased === ScriptApp.TimeBasedTriggerSource.DAYS) {
+              const everyDays = firstTrigger.getEveryDays()
+              if (everyDays === 1) {
+                const hour = firstTrigger.getHour()
+                schedule = `ежедневно в ${hour}:00`
+              } else {
+                schedule = `каждые ${everyDays} дней`
+              }
+            } else if (timeBased === ScriptApp.TimeBasedTriggerSource.WEEKS) {
+              schedule = 'еженедельно'
+            }
+          }
+          
+          report += `  • ${handler}${count > 1 ? ` (${count})` : ''}${schedule ? ` - ${schedule}` : ''}\n`
+        }
+      }
+    } catch (e) {
+      report += `❌ Триггеры: ошибка проверки (${e.message})\n`
+    }
+    
+    // Проверка последних выполнений из AutoLog
+    try {
+      const autoLogSheet = getAutoLogSheet_()
+      if (autoLogSheet && autoLogSheet.getLastRow() >= DATA_START_ROW) {
+        const lastRow = autoLogSheet.getLastRow()
+        const lastEntries = autoLogSheet.getRange(Math.max(DATA_START_ROW, lastRow - 4), 1, Math.min(5, lastRow - 1), 3).getValues()
+        
+        if (lastEntries.length > 0) {
+          report += '\n📋 Последние операции:\n'
+          lastEntries.reverse().forEach((row, index) => {
+            const date = row[0] ? Utilities.formatDate(new Date(row[0]), Session.getScriptTimeZone(), 'dd.MM.yy HH:mm') : '—'
+            const action = row[1] || '—'
+            const status = row[2] || '—'
+            report += `  ${index + 1}. ${date} - ${action} (${status})\n`
+          })
+        }
+      }
+    } catch (e) {
+      report += `\n⚠️ Не удалось получить историю операций: ${e.message}\n`
+    }
+    
+    ui.alert('Проверка автоматизации', report, ui.ButtonSet.OK)
+    
+  } catch (e) {
+    console.error('checkAutomationStatus: ошибка:', e)
+    ui.alert('Ошибка', 'Не удалось проверить состояние автоматизации: ' + e.message, ui.ButtonSet.OK)
   }
 }
 

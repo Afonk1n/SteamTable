@@ -24,6 +24,7 @@ const HEADER_HEIGHT = 35
 // Steam параметры
 const STEAM_APP_ID = 570  // Dota 2
 const STEAM_FEE = 0.85  // Комиссия Steam 15%
+const MAX_REASONABLE_PRICE = 50000  // Максимальная разумная цена предмета в рублях (для валидации)
 
 // Форматы чисел
 const NUMBER_FORMATS = {
@@ -229,22 +230,21 @@ const INVEST_COLUMNS = {
 }
 
 // Идентификаторы колонок для Sales
-// НОВАЯ СТРУКТУРА: K - Buyback Score, L - Рекомендация, M - Hero Trend, N - Risk Level (метрики удалены из отображения, но остаются в коде для расчетов)
+// СТРУКТУРА БЕЗ КОЛОНКИ КОЛИЧЕСТВО: C - Цена продажи, D - Текущая цена, E - Просадка, F - Просадка %, G - Ссылка, H - Min, I - Max, J - Buyback Score, K - Рекомендация, L - Hero Trend, M - Risk Level
 const SALES_COLUMNS = {
   IMAGE: 'A',
   NAME: 'B',
-  QUANTITY: 'C',  // НОВАЯ: Количество
-  SELL_PRICE: 'D',  // Было C, стало D
-  CURRENT_PRICE: 'E',  // Было D, стало E
-  PRICE_DROP: 'F',  // Было E, стало F
-  PRICE_DROP_PERCENT: 'G',  // НОВАЯ: Процент просадки
-  LINK: 'H',  // Было F, стало H
-  MIN_PRICE: 'I',  // Было G, стало I
-  MAX_PRICE: 'J',  // Было H, стало J
-  BUYBACK_SCORE: 'K',  // НОВАЯ: Buyback Score (после Max)
-  RECOMMENDATION: 'L',  // Перемещено из L
-  HERO_TREND: 'M',  // НОВАЯ: Hero Trend
-  RISK_LEVEL: 'N'  // НОВАЯ: Risk Level (метрики удалены из отображения, но остаются в коде для расчетов)
+  SELL_PRICE: 'C',  // Было D, стало C (убрали QUANTITY)
+  CURRENT_PRICE: 'D',  // Было E, стало D
+  PRICE_DROP: 'E',  // Было F, стало E
+  PRICE_DROP_PERCENT: 'F',  // Было G, стало F
+  LINK: 'G',  // Было H, стало G
+  MIN_PRICE: 'H',  // Было I, стало H
+  MAX_PRICE: 'I',  // Было J, стало I
+  BUYBACK_SCORE: 'J',  // Было K, стало J
+  RECOMMENDATION: 'K',  // Было L, стало K
+  HERO_TREND: 'L',  // Было M, стало L
+  RISK_LEVEL: 'M'  // Было N, стало M
 }
 
 // Идентификаторы колонок для History
@@ -303,7 +303,6 @@ const HEADERS = {
   SALES: [
     'Изображение',
     'Название',
-    'Количество',
     'Цена продажи',
     'Текущая цена',
     'Просадка',

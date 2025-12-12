@@ -34,9 +34,13 @@ function invest_calculateBatch_(sheet, currentPrices) {
     const quantity = Number(quantities[i][0])
     const buyPrice = Number(buyPrices[i][0])
     
-    if (Number.isFinite(currentPrice) && currentPrice > 0 &&
+    // ВАЛИДАЦИЯ: Проверяем цены через validatePrice_ для более строгой проверки
+    const priceValidation = currentPrice > 0 ? validatePrice_(currentPrice, `строка ${DATA_START_ROW + i}`) : { valid: false }
+    const buyPriceValidation = buyPrice > 0 ? validatePrice_(buyPrice, `строка ${DATA_START_ROW + i} (buyPrice)`) : { valid: false }
+    
+    if (priceValidation.valid &&
         Number.isFinite(quantity) && quantity > 0 &&
-        Number.isFinite(buyPrice) && buyPrice > 0) {
+        buyPriceValidation.valid) {
       const totalInvestment = quantity * buyPrice
       const currentValue = quantity * currentPrice
       const currentValueAfterFee = currentValue * STEAM_FEE
@@ -75,11 +79,20 @@ function invest_calculateSingle_(sheet, row, currentPrice) {
   const quantity = Number(sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.QUANTITY)).getValue())
   const buyPrice = Number(sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.BUY_PRICE)).getValue())
   
-  sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.CURRENT_PRICE)).setValue(currentPrice)
+  // ВАЛИДАЦИЯ: Проверяем цены перед использованием
+  const priceValidation = currentPrice > 0 ? validatePrice_(currentPrice, `строка ${row}`) : { valid: false }
+  const buyPriceValidation = buyPrice > 0 ? validatePrice_(buyPrice, `строка ${row} (buyPrice)`) : { valid: false }
   
-  if (Number.isFinite(currentPrice) && currentPrice > 0 &&
+  if (priceValidation.valid) {
+    sheet.getRange(row, getColumnIndex(INVEST_COLUMNS.CURRENT_PRICE)).setValue(priceValidation.price)
+  } else {
+    console.warn(`Invest: некорректная текущая цена в строке ${row}: ${currentPrice}`)
+    return
+  }
+  
+  if (priceValidation.valid &&
       Number.isFinite(quantity) && quantity > 0 &&
-      Number.isFinite(buyPrice) && buyPrice > 0) {
+      buyPriceValidation.valid) {
     const totalInvestment = quantity * buyPrice
     const currentValue = quantity * currentPrice
     const currentValueAfterFee = currentValue * STEAM_FEE
