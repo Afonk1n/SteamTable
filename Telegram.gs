@@ -313,10 +313,9 @@ function telegram_checkPriceTargets() {
 
 /**
  * Ежедневная проверка цен и отправка уведомлений
- * Отправляет три сообщения:
- * 1. Общий отчет о портфеле
- * 2. Позиции, достигшие цели (готовы к продаже)
- * 3. Позиции с сильной просадкой (50%+, сигнал покупки)
+ * Отправляет:
+ * 1. Ежедневный отчет (топ-5 покупок и топ-5 откупов) через telegram_sendDailyReport()
+ * 2. Все позиции, достигшие цели (группированно в одно сообщение)
  */
 function telegram_checkDailyPriceTargets() {
   const now = new Date()
@@ -330,7 +329,7 @@ function telegram_checkDailyPriceTargets() {
     return // Telegram не настроен, просто выходим
   }
   
-  // 1. Отправляем общий отчет о портфеле
+  // 1. Отправляем ежедневный отчет (топ-5 покупок и топ-5 откупов)
   try {
     telegram_sendDailyReport()
     Utilities.sleep(LIMITS.TELEGRAM_REPORT_DELAY_MS)
@@ -365,8 +364,6 @@ function telegram_checkDailyPriceTargets() {
   
   // Собираем позиции, достигшие цели
   const reachedGoal = []
-  // Собираем позиции с сильной просадкой
-  const strongDrop = []
   
   for (let i = 0; i < count; i++) {
     const name = String(names[i][0] || '').trim()
@@ -397,41 +394,25 @@ function telegram_checkDailyPriceTargets() {
         investmentScore
       })
     }
-    
-    // Проверка сильной просадки (50%+)
-    if (currentPrice <= goal * 0.5) {
-      const dropPercent = ((goal - currentPrice) / goal) * 100
-      strongDrop.push({
-        name,
-        currentPrice,
-        goal,
-        dropPercent,
-        potential,
-        maxPrice,
-        recommendation,
-        investmentScore
-      })
-    }
   }
   
   // Сортируем позиции перед отправкой
   // Достигшие цели - от самой прибыльной (по проценту) к менее прибыльной
   reachedGoal.sort((a, b) => b.profitPercent - a.profitPercent)
   
-  // Просевшие позиции - от самых просевших (по проценту просадки) к менее просевшим
-  strongDrop.sort((a, b) => b.dropPercent - a.dropPercent)
-  
   let messagesSent = 0
   let messagesFailed = 0
   
-  // Отправляем первое сообщение: достигшие цели
+  // Отправляем сообщение: все достигшие цели (группированно)
   if (reachedGoal.length > 0) {
-    let message = `🎯 <b>Позиции, достигшие цели</b>\n\n`
+    let message = `🎯 <b>Достигли цели</b> (${reachedGoal.length})\n\n`
     
     reachedGoal.forEach((item, index) => {
       const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(item.name)}`
-      message += `${index + 1}. <b><a href="${itemUrl}">${item.name}</a></b>\n`
-      message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (цель: ${item.goal.toFixed(2)} ₽)\n`
+      const formattedName = telegram_formatItemNameWithScore_(item.name, item.investmentScore)
+      message += `${index + 1}. <a href="${itemUrl}">${formattedName}</a>\n`
+      message += `   Текущая цена: ${item.currentPrice.toFixed(2)} ₽\n`
+      message += `   Цель: ${item.goal.toFixed(2)} ₽\n`
       message += `   Прибыль: ${item.profit.toFixed(2)} ₽ (${(item.profitPercent * 100).toFixed(2)}%)\n`
       
       // Добавляем информацию о потенциале
@@ -440,7 +421,7 @@ function telegram_checkDailyPriceTargets() {
       if (item.potential !== null && !isNaN(item.potential)) {
         const potentialPercent = item.potential * 100
         const potentialPrice = item.currentPrice * (1 + item.potential)
-        message += `   Потенциал (P85): <b>+${potentialPercent.toFixed(1)}%</b> (до ~${potentialPrice.toFixed(2)} ₽)`
+        message += `   Потенциал роста (P85): <b>+${potentialPercent.toFixed(1)}%</b> (до ~${potentialPrice.toFixed(2)} ₽)`
         
         // Теоретический максимум как дополнительная информация
         // ВАЖНО: возврат к максимуму не гарантирован, поэтому акцент на P85
@@ -451,13 +432,8 @@ function telegram_checkDailyPriceTargets() {
         message += `\n`
       }
       
-      if (item.recommendation) {
-        message += `   ${item.recommendation}\n`
-      }
       message += `\n`
     })
-    
-    message += `Всего: <b>${reachedGoal.length}</b> позиций`
     
     const result = telegram_sendMessage(message)
     if (result.ok) {
@@ -466,55 +442,12 @@ function telegram_checkDailyPriceTargets() {
       messagesFailed++
       console.error(`Telegram: ошибка отправки сообщения о достигших цели: ${result.error}`)
     }
-    Utilities.sleep(LIMITS.TELEGRAM_REPORT_DELAY_MS)
   }
   
-  // Отправляем второе сообщение: просевшие позиции
-  if (strongDrop.length > 0) {
-    let message = `📉 <b>Позиции с сильной просадкой</b>\n\n`
-    
-    strongDrop.forEach((item, index) => {
-      const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(item.name)}`
-      const formattedName = telegram_formatItemNameWithScore_(item.name, item.investmentScore)
-      message += `${index + 1}. <a href="${itemUrl}">${formattedName}</a>\n`
-      message += `   Цена: ${item.currentPrice.toFixed(2)} ₽ (макс: ${item.goal.toFixed(2)} ₽)\n`
-      message += `   Просадка: ${item.dropPercent.toFixed(2)}%\n`
-      
-      // Добавляем информацию о потенциале
-      // Потенциал P85 - это реалистичная оценка (85-й перцентиль всех цен) - основной потенциал
-      // maxPrice - теоретический максимум из всей истории (дополнительная информация)
-      if (item.potential !== null && !isNaN(item.potential)) {
-        const potentialPercent = item.potential * 100
-        const potentialPrice = item.currentPrice * (1 + item.potential)
-        message += `   Потенциал (P85): <b>+${potentialPercent.toFixed(1)}%</b> (до ~${potentialPrice.toFixed(2)} ₽)`
-        
-        // Теоретический максимум как дополнительная информация
-        // ВАЖНО: возврат к максимуму не гарантирован, поэтому акцент на P85
-        if (item.maxPrice && item.maxPrice > item.currentPrice) {
-          const potentialToMax = ((item.maxPrice - item.currentPrice) / item.currentPrice) * 100
-          message += `\n   Теор. максимум: +${potentialToMax.toFixed(1)}% (${item.maxPrice.toFixed(2)} ₽)`
-        }
-        message += `\n`
-      }
-      
-      message += `\n`
-    })
-    
-    message += `Всего: <b>${strongDrop.length}</b> позиций`
-    
-    const result = telegram_sendMessage(message)
-    if (result.ok) {
-      messagesSent++
-    } else {
-      messagesFailed++
-      console.error(`Telegram: ошибка отправки сообщения о просадке: ${result.error}`)
-    }
-  }
-  
-  if (reachedGoal.length === 0 && strongDrop.length === 0) {
-    console.log('Telegram: нет позиций для уведомлений')
+  if (reachedGoal.length === 0) {
+    console.log('Telegram: нет позиций, достигших цели')
   } else {
-    console.log(`Telegram: отправлено уведомлений - достигли цели: ${reachedGoal.length}, просадка: ${strongDrop.length}`)
+    console.log(`Telegram: отправлено уведомление о ${reachedGoal.length} позициях, достигших цели`)
     if (messagesFailed > 0) {
       console.error(`Telegram: ошибок при отправке: ${messagesFailed} из ${messagesSent + messagesFailed}`)
     }
@@ -583,54 +516,34 @@ function telegram_sendDailyReport() {
       }
     }
     
-    // Рассчитываем общий процент прибыли
-    const totalProfitPercent = totalInvestment > 0 
-      ? ((totalCurrentValue / totalInvestment) - 1) 
-      : 0
-    
-    // Сообщение 1: Общие метрики портфеля
-    const message1 = `📊 <b>Отчет по портфелю</b>\n\n` +
-      `Общие вложения: <b>${totalInvestment.toFixed(2)}</b> ₽\n` +
-      `Текущая стоимость: <b>${totalCurrentValue.toFixed(2)}</b> ₽\n` +
-      `Прибыль/убыток: <b>${totalProfit.toFixed(2)}</b> ₽ (${(totalProfitPercent * 100).toFixed(2)}%)\n\n` +
-      `Активных позиций: <b>${totalPositions}</b>\n` +
-      `Прибыльных: <b>${profitableCount}</b>\n` +
-      `Убыточных: <b>${unprofitableCount}</b>`
-    
-    let result = telegram_sendMessage(message1)
-    if (result.ok) {
-      console.log('Telegram: общие метрики портфеля отправлены')
-      Utilities.sleep(LIMITS.TELEGRAM_REPORT_DELAY_MS)
-    }
-    
-    // Сообщение 2: Топ-5 возможностей из History (Investment Score >= 75, НЕ в портфеле)
+    // Сообщение 1: Топ-5 возможностей из History (Investment Score >= 75, включая в портфеле для докупки)
     const historySheet = getHistorySheet_()
-    const investSheet = getInvestSheet_()
-    if (historySheet && investSheet) {
-      const investLastRow = investSheet.getLastRow()
-      const investNames = investLastRow > 1 
-        ? investSheet.getRange(DATA_START_ROW, getColumnIndex(INVEST_COLUMNS.NAME), investLastRow - 1, 1).getValues()
-        : []
-      const portfolioItems = new Set(investNames.map(row => String(row[0] || '').trim()).filter(name => name))
-      
+    let result = null
+    
+    if (historySheet) {
       const historyLastRow = historySheet.getLastRow()
       if (historyLastRow > 1) {
         const count = historyLastRow - 1
         const names = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), count, 1).getValues()
         const investmentScores = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.INVESTMENT_SCORE), count, 1).getValues()
         const currentPrices = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.CURRENT_PRICE), count, 1).getValues()
+        const potentials = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.POTENTIAL), count, 1).getValues()
+        const heroTrends = historySheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.HERO_TREND), count, 1).getValues()
         
         const opportunities = []
         for (let i = 0; i < count; i++) {
           const name = String(names[i][0] || '').trim()
-          if (!name || portfolioItems.has(name)) continue
+          if (!name) continue
           
           const investmentScoreStr = String(investmentScores[i][0] || '').trim()
           const investmentScore = telegram_parseScore_(investmentScoreStr)
           
           if (investmentScore && investmentScore >= ANALYTICS_THRESHOLDS.INVESTMENT_SCORE_CRITICAL) {
             const currentPrice = Number(currentPrices[i][0]) || 0
-            opportunities.push({ name, investmentScore, currentPrice })
+            const potential = Number(potentials[i][0]) || null
+            const heroTrendStr = String(heroTrends[i][0] || '').trim()
+            const heroTrend = telegram_parseScore_(heroTrendStr)
+            opportunities.push({ name, investmentScore, currentPrice, potential, heroTrend })
           }
         }
         
@@ -638,15 +551,28 @@ function telegram_sendDailyReport() {
         const top5 = opportunities.slice(0, 5)
         
         if (top5.length > 0) {
-          let message2 = `🟢 <b>Топ-5 возможностей для покупки</b>\n\n`
+          let message1 = `🟢 <b>Топ-5 возможностей для покупки</b>\n\n`
           top5.forEach((opp, index) => {
             const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(opp.name)}`
-            message2 += `${index + 1}. <b><a href="${itemUrl}">${opp.name}</a></b>\n`
-            message2 += `   Investment Score: ${analytics_formatScore(opp.investmentScore)}\n`
-            message2 += `   Цена: ${opp.currentPrice.toFixed(2)} ₽\n\n`
+            const formattedName = telegram_formatItemNameWithScore_(opp.name, opp.investmentScore)
+            message1 += `${index + 1}. <a href="${itemUrl}">${formattedName}</a>\n`
+            message1 += `   Текущая цена: ${opp.currentPrice.toFixed(2)} ₽\n`
+            
+            // Добавляем потенциал (P85)
+            if (opp.potential !== null && !isNaN(opp.potential)) {
+              const potentialPercent = opp.potential * 100
+              message1 += `   Потенциал (P85): <b>+${potentialPercent.toFixed(1)}%</b>\n`
+            }
+            
+            // Добавляем тренд героя
+            if (opp.heroTrend !== null) {
+              message1 += `   Тренд героя: ${analytics_formatScore(opp.heroTrend)}\n`
+            }
+            
+            message1 += `\n`
           })
           
-          result = telegram_sendMessage(message2)
+          result = telegram_sendMessage(message1)
           if (result.ok) {
             console.log('Telegram: топ-5 возможностей отправлены')
             Utilities.sleep(LIMITS.TELEGRAM_REPORT_DELAY_MS)
@@ -655,7 +581,7 @@ function telegram_sendDailyReport() {
       }
     }
     
-    // Сообщение 3: Топ-5 откупов из Sales (Buyback Score >= 75)
+    // Сообщение 2: Топ-5 откупов из Sales (Buyback Score >= 75)
     const salesSheet = getSalesSheet_()
     if (salesSheet) {
       const salesLastRow = salesSheet.getLastRow()
@@ -665,6 +591,29 @@ function telegram_sendDailyReport() {
         const buybackScores = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.BUYBACK_SCORE), count, 1).getValues()
         const currentPrices = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.CURRENT_PRICE), count, 1).getValues()
         const priceDrops = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.PRICE_DROP_PERCENT), count, 1).getValues()
+        const sellPrices = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.SELL_PRICE), count, 1).getValues()
+        const maxPrices = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.MAX_PRICE), count, 1).getValues()
+        
+        // Получаем потенциал из History
+        const historySheetForSales = getHistorySheet_()
+        const historyNameToPotential = new Map()
+        if (historySheetForSales) {
+          const historyLastRow = historySheetForSales.getLastRow()
+          if (historyLastRow > 1) {
+            const historyCount = historyLastRow - 1
+            const historyNames = historySheetForSales.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), historyCount, 1).getValues()
+            const historyPotentials = historySheetForSales.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.POTENTIAL), historyCount, 1).getValues()
+            for (let i = 0; i < historyCount; i++) {
+              const name = String(historyNames[i][0] || '').trim()
+              if (name) {
+                const potential = Number(historyPotentials[i][0]) || null
+                if (potential !== null && !isNaN(potential)) {
+                  historyNameToPotential.set(name, potential)
+                }
+              }
+            }
+          }
+        }
         
         const buybacks = []
         for (let i = 0; i < count; i++) {
@@ -677,7 +626,10 @@ function telegram_sendDailyReport() {
           if (buybackScore && buybackScore >= ANALYTICS_THRESHOLDS.BUYBACK_SCORE_CRITICAL) {
             const currentPrice = Number(currentPrices[i][0]) || 0
             const priceDrop = Number(priceDrops[i][0]) || 0
-            buybacks.push({ name, buybackScore, currentPrice, priceDrop })
+            const sellPrice = Number(sellPrices[i][0]) || 0
+            const maxPrice = Number(maxPrices[i][0]) || null
+            const potential = historyNameToPotential.get(name) || null
+            buybacks.push({ name, buybackScore, currentPrice, priceDrop, sellPrice, maxPrice, potential })
           }
         }
         
@@ -685,16 +637,31 @@ function telegram_sendDailyReport() {
         const top5 = buybacks.slice(0, 5)
         
         if (top5.length > 0) {
-          let message3 = `💰 <b>Топ-5 откупов</b>\n\n`
+          let message2 = `💰 <b>Топ-5 возможностей для откупа</b>\n\n`
           top5.forEach((item, index) => {
             const itemUrl = `https://steamcommunity.com/market/listings/${STEAM_APP_ID}/${encodeURIComponent(item.name)}`
-            message3 += `${index + 1}. <b><a href="${itemUrl}">${item.name}</a></b>\n`
-            message3 += `   Buyback Score: ${analytics_formatScore(item.buybackScore)}\n`
-            message3 += `   Цена: ${item.currentPrice.toFixed(2)} ₽\n`
-            message3 += `   Просадка: ${item.priceDrop.toFixed(2)}%\n\n`
+            const formattedName = telegram_formatItemNameWithScore_(item.name, item.buybackScore)
+            message2 += `${index + 1}. <a href="${itemUrl}">${formattedName}</a>\n`
+            message2 += `   Просадка: ${item.priceDrop.toFixed(2)}%\n`
+            message2 += `   Цена продажи: ${item.sellPrice.toFixed(2)} ₽`
+            
+            // Используем Max из History (maxPrice из Sales синхронизирован из History)
+            if (item.maxPrice && item.maxPrice > 0) {
+              message2 += ` (макс: ${item.maxPrice.toFixed(2)} ₽)`
+            }
+            message2 += `\n`
+            message2 += `   Текущая цена: ${item.currentPrice.toFixed(2)} ₽\n`
+            
+            // Добавляем потенциал (P85)
+            if (item.potential !== null && !isNaN(item.potential)) {
+              const potentialPercent = item.potential * 100
+              message2 += `   Потенциал (P85): <b>+${potentialPercent.toFixed(1)}%</b>\n`
+            }
+            
+            message2 += `\n`
           })
           
-          result = telegram_sendMessage(message3)
+          result = telegram_sendMessage(message2)
           if (result.ok) {
             console.log('Telegram: топ-5 откупов отправлены')
           }
@@ -991,6 +958,7 @@ function telegram_checkSalesBuybackOpportunities_() {
   const priceDrops = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.PRICE_DROP_PERCENT), count, 1).getValues()
   const sellPrices = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.SELL_PRICE), count, 1).getValues()
   const currentPrices = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.CURRENT_PRICE), count, 1).getValues()
+  const maxPrices = salesSheet.getRange(DATA_START_ROW, getColumnIndex(SALES_COLUMNS.MAX_PRICE), count, 1).getValues()
   
   const opportunities = []
   
@@ -1011,6 +979,7 @@ function telegram_checkSalesBuybackOpportunities_() {
     const priceDropPercent = Number(priceDrops[i][0]) || 0
     const sellPrice = Number(sellPrices[i][0]) || 0
     const currentPrice = Number(currentPrices[i][0]) || 0
+    const maxPrice = Number(maxPrices[i][0]) || null
     
     const eventId = `buyback_${buybackScore.toFixed(2)}`
     const cooldownMs = TELEGRAM_COOLDOWN_MS.BUYBACK_SCORE
@@ -1028,6 +997,7 @@ function telegram_checkSalesBuybackOpportunities_() {
       priceDropPercent,
       sellPrice,
       currentPrice,
+      maxPrice,
       eventId
     })
   }
@@ -1039,11 +1009,16 @@ function telegram_checkSalesBuybackOpportunities_() {
       : ''
     
     const formattedName = telegram_formatItemNameWithScore_(opp.name, opp.buybackScore)
+    let maxPriceInfo = ''
+    if (opp.maxPrice && opp.maxPrice > 0) {
+      maxPriceInfo = ` (макс: ${opp.maxPrice.toFixed(2)} ₽)`
+    }
+    
     const message = `💰 <b>Отличный момент для откупа!</b>\n\n` +
       `Предмет: ${formattedName}\n` +
       `Уровень риска: ${opp.riskLevel}\n` +
       `Просадка: ${opp.priceDropPercent.toFixed(2)}%\n` +
-      `Цена продажи: ${opp.sellPrice.toFixed(2)} ₽ (макс: ${opp.sellPrice.toFixed(2)} ₽)\n` +
+      `Цена продажи: ${opp.sellPrice.toFixed(2)} ₽${maxPriceInfo}\n` +
       `Текущая цена: ${opp.currentPrice.toFixed(2)} ₽` +
       heroTrendInfo
     
