@@ -36,22 +36,31 @@ function history_formatTable() {
   sheet.setColumnWidth(10, 130) // J - Рекомендация
   sheet.setColumnWidth(11, 120) // K - Фаза
   sheet.setColumnWidth(12, 100) // L - Потенциал
-  sheet.setColumnWidth(13, 150) // M - Тренд (объединенный формат: "🟨 Боковик 39 д.", убрали колонку Дней смены)
-  sheet.setColumnWidth(14, 100) // N - Hero Trend (перемещено из O)
-  sheet.setColumnWidth(15, 120) // O - Contest Rate Change (7d) (перемещено из P)
-  sheet.setColumnWidth(16, 120) // P - Contest Rate (current) (перемещено из Q)
-  sheet.setColumnWidth(17, 100) // Q - Pick Rate (current) (перемещено из R)
-  sheet.setColumnWidth(18, 100) // R - Win Rate (current) (перемещено из S)
-  sheet.setColumnWidth(19, 150) // S - Hero Name (перемещено из T)
+  sheet.setColumnWidth(13, 150) // M - Тренд (объединенный формат: "🟨 Боковик 39 д.")
+  sheet.setColumnWidth(14, 100) // N - Hero Trend
+  sheet.setColumnWidth(15, 120) // O - Pro Contest Rate Current
+  sheet.setColumnWidth(16, 120) // P - Pro Contest Rate Change 7d
+  sheet.setColumnWidth(17, 100) // Q - Pick Rate Change Immortal 7d
+  sheet.setColumnWidth(18, 100) // R - Pick Rate Change Immortal 24h
+  sheet.setColumnWidth(19, 100) // S - Pick Rate Immortal
+  sheet.setColumnWidth(20, 100) // T - Win Rate
+  sheet.setColumnWidth(21, 150) // U - Hero Name
+  sheet.setColumnWidth(22, 100) // V - Мета сигнал
 
   if (lastRow > 1) {
-    const dataCols = 19 // Количество колонок с данными (до дат, было 20)
+    const dataCols = 22 // Количество колонок с данными (A-V, до дат W+)
     sheet
       .getRange(2, 1, lastRow - 1, dataCols)
       .setVerticalAlignment('middle')
       .setHorizontalAlignment('center')
     sheet.getRange(`B2:B${lastRow}`).setHorizontalAlignment('left')
-    sheet.getRange(`T2:T${lastRow}`).setHorizontalAlignment('left') // Hero Name - выравнивание влево
+    // Выравнивание колонок статистики героя
+    const winRateCol = getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT) // T - Винрейт
+    const heroNameCol = getColumnIndex(HISTORY_COLUMNS.HERO_NAME) // U - Имя героя
+    const metaSignalCol = getColumnIndex(HISTORY_COLUMNS.META_SIGNAL) // V - Мета сигнал
+    sheet.getRange(DATA_START_ROW, winRateCol, lastRow - 1, 1).setHorizontalAlignment('center') // Винрейт - по центру
+    sheet.getRange(DATA_START_ROW, heroNameCol, lastRow - 1, 1).setHorizontalAlignment('left') // Имя героя - влево
+    sheet.getRange(DATA_START_ROW, metaSignalCol, lastRow - 1, 1).setHorizontalAlignment('center') // Мета сигнал - по центру
     // Форматирование числовых колонок
     sheet.getRange(`F2:H${lastRow}`).setNumberFormat(NUMBER_FORMATS.CURRENCY)
     // Форматирование колонки Потенциал (L) как процент с знаком "+"
@@ -86,7 +95,7 @@ function history_formatTable() {
   }
 
   sheet.setFrozenRows(HEADER_ROW)
-  // Дополнительно форматируем все существующие колонки дат (M и далее, было N)
+  // Дополнительно форматируем все существующие колонки дат (W и далее, FIRST_DATE_COL = 23)
   history_formatAllDateColumns_(sheet)
   // Выделяем минимум и максимум (только визуальное форматирование)
   history_highlightMinMax_(sheet)
@@ -530,7 +539,7 @@ function history_formatPriceColumn_(sheet, colIndex) {
 function history_highlightMinMax_(sheet) {
   const lastRow = sheet.getLastRow()
   const lastCol = sheet.getLastColumn()
-  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 14 (колонка N)
+  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 23 (колонка W)
   
   if (lastRow <= 1 || lastCol < firstDateCol) return
 
@@ -652,7 +661,7 @@ function history_updateCurrentPriceMinMax_(sheet = null) {
   if (lastRow <= 1) return
   
   const lastCol = sheet.getLastColumn()
-  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 14
+  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 23 (колонка W)
   const currentPriceCol = getColumnIndex(HISTORY_COLUMNS.CURRENT_PRICE)
   const minPriceCol = getColumnIndex(HISTORY_COLUMNS.MIN_PRICE)
   const maxPriceCol = getColumnIndex(HISTORY_COLUMNS.MAX_PRICE)
@@ -888,7 +897,7 @@ function history_formatAllDateColumns_(sheet) {
 function history_analyzeTrend(row) {
   const sheet = getOrCreateHistorySheet_()
   const lastCol = sheet.getLastColumn()
-  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 14
+  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 23 (колонка W)
   
   if (lastCol < firstDateCol) return { trend: '🟪', daysChange: 0 }
 
@@ -1255,7 +1264,7 @@ function history_updateTrends() {
 
   const count = lastRow - 1
   const lastCol = sheet.getLastColumn()
-  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 14
+  const firstDateCol = HISTORY_COLUMNS.FIRST_DATE_COL // 23 (колонка W)
   
   // Определяем номера колонок для расширенной аналитики (K, L, J)
   const phaseCol = getColumnIndex(HISTORY_COLUMNS.PHASE)           // K
@@ -2081,9 +2090,14 @@ function history_updateHeroStatsColumns() {
  * Расчет Investment Score для всех предметов в History
  */
 function history_updateInvestmentScores() {
+  const startTime = Date.now()
+  const TIMEOUT_MS = LIMITS.TIME_BUDGET_MS - LIMITS.SAFETY_BUFFER_MS // 5.5 минут - буфер безопасности
+  
   const sheet = getOrCreateHistorySheet_()
   const lastRow = sheet.getLastRow()
   if (lastRow < DATA_START_ROW) return
+  
+  console.log(`History: начало обновления Investment Scores для ${lastRow - HEADER_ROW} строк`)
   
   const mappings = heroMapping_getAllMappings()
   const itemNames = sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.NAME), lastRow - HEADER_ROW, 1).getValues()
@@ -2095,6 +2109,12 @@ function history_updateInvestmentScores() {
   // Batch запросы (до 50 предметов за раз)
   const batchSize = API_CONFIG.STEAM_WEB_API.MAX_ITEMS_PER_REQUEST
   for (let i = 0; i < itemNamesList.length; i += batchSize) {
+    // Проверка таймаута перед каждым batch запросом
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      console.warn(`History: таймаут при получении данных SteamWebAPI (обработано ${i} из ${itemNamesList.length} предметов)`)
+      break
+    }
+    
     const batch = itemNamesList.slice(i, i + batchSize)
     const result = steamWebAPI_fetchItems(batch, 'dota2')
     if (result.ok && result.items) {
@@ -2112,53 +2132,72 @@ function history_updateInvestmentScores() {
   
   // Подготовка данных для batch-операций
   const investmentScores = []
+  let processedCount = 0
+  let errorCount = 0
   
-  // Рассчитываем Investment Score для всех строк
+  // Рассчитываем Investment Score для всех строк с защитой от таймаута
   for (let i = 0; i < itemNames.length; i++) {
-    const itemName = String(itemNames[i][0] || '').trim()
-    if (!itemName) {
-      investmentScores.push([null])
-      continue
-    }
-    
-    const mapping = mappings[itemName]
-    const itemData = itemsData[itemName]
-    
-    if (!itemData) {
-      investmentScores.push([null])
-      continue
-    }
-    
-    const row = DATA_START_ROW + i
-    
-    // Получаем историю цен для предмета
-    const historyData = history_getPriceHistoryForItem_(sheet, row)
-    
-    // Определяем категорию и heroId
-    const category = mapping ? mapping.category : 'Common Item'
-    const heroId = mapping && mapping.heroId ? mapping.heroId : null
-    const rankCategory = mapping && mapping.heroId ? 'High Rank' : null // Приоритет High Rank
-    
-    // Получаем статистику героя
-    let heroStats = null
-    if (heroId && rankCategory) {
-      const latestStats = heroStats_getLatestStats(heroId, rankCategory)
-      if (latestStats) {
-        heroStats = {[rankCategory]: latestStats}
+    // Проверка таймаута перед каждой итерацией
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      console.warn(`History: таймаут при расчете Investment Scores (обработано ${processedCount} из ${itemNames.length} строк)`)
+      // Заполняем оставшиеся строки null
+      for (let j = i; j < itemNames.length; j++) {
+        investmentScores.push([null])
       }
+      break
     }
     
-    // Рассчитываем Investment Score
-    const investmentScore = analytics_calculateInvestmentScore(
-      itemData,
-      heroStats,
-      historyData,
-      category,
-      heroId,
-      rankCategory
-    )
-    
-    investmentScores.push([analytics_formatScore(investmentScore)])
+    try {
+      const itemName = String(itemNames[i][0] || '').trim()
+      if (!itemName) {
+        investmentScores.push([null])
+        continue
+      }
+      
+      const mapping = mappings[itemName]
+      const itemData = itemsData[itemName]
+      
+      if (!itemData) {
+        investmentScores.push([null])
+        continue
+      }
+      
+      const row = DATA_START_ROW + i
+      
+      // Получаем историю цен для предмета
+      const historyData = history_getPriceHistoryForItem_(sheet, row)
+      
+      // Определяем категорию и heroId
+      const category = mapping ? mapping.category : 'Common Item'
+      const heroId = mapping && mapping.heroId ? mapping.heroId : null
+      const rankCategory = mapping && mapping.heroId ? 'High Rank' : null // Приоритет High Rank
+      
+      // Получаем статистику героя
+      let heroStats = null
+      if (heroId && rankCategory) {
+        const latestStats = heroStats_getLatestStats(heroId, rankCategory)
+        if (latestStats) {
+          heroStats = {[rankCategory]: latestStats}
+        }
+      }
+      
+      // Рассчитываем Investment Score
+      const investmentScore = analytics_calculateInvestmentScore(
+        itemData,
+        heroStats,
+        historyData,
+        category,
+        heroId,
+        rankCategory
+      )
+      
+      investmentScores.push([analytics_formatScore(investmentScore)])
+      processedCount++
+    } catch (e) {
+      console.error(`History: ошибка при расчете Investment Score для строки ${DATA_START_ROW + i}:`, e)
+      investmentScores.push([null])
+      errorCount++
+    }
   }
   
   // Batch-запись Investment Scores
@@ -2167,12 +2206,18 @@ function history_updateInvestmentScores() {
     sheet.getRange(DATA_START_ROW, getColumnIndex(HISTORY_COLUMNS.INVESTMENT_SCORE), count, 1).setValues(investmentScores)
   }
   
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+  console.log(`History: обновление Investment Scores завершено за ${duration} сек (обработано: ${processedCount}, ошибок: ${errorCount})`)
+  
   // Проверяем возможности для покупки (критические уведомления)
-  try {
-    telegram_checkHistoryInvestmentOpportunities_()
-  } catch (e) {
-    console.error('History: ошибка при проверке возможностей для покупки:', e)
-    // Не прерываем выполнение, просто логируем ошибку
+  // Выполняем только если не было таймаута
+  if (Date.now() - startTime < TIMEOUT_MS) {
+    try {
+      telegram_checkHistoryInvestmentOpportunities_()
+    } catch (e) {
+      console.error('History: ошибка при проверке возможностей для покупки:', e)
+      // Не прерываем выполнение, просто логируем ошибку
+    }
   }
 }
 

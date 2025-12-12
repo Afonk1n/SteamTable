@@ -221,7 +221,7 @@ function sales_syncMinMaxFromHistory(updateAll = true) {
   const sheet = getSalesSheet_()
   if (!sheet) return
 
-  // SALES_COLUMNS.MIN_PRICE = 'I', SALES_COLUMNS.MAX_PRICE = 'J'
+  // SALES_COLUMNS.MIN_PRICE = 'H', SALES_COLUMNS.MAX_PRICE = 'I'
   const minColIndex = getColumnIndex(SALES_COLUMNS.MIN_PRICE)
   const maxColIndex = getColumnIndex(SALES_COLUMNS.MAX_PRICE)
   

@@ -194,7 +194,7 @@ function heroMapping_updateItem(itemName, heroName) {
  * @param {number} row - Номер строки
  */
 function heroMapping_formatNewRow_(sheet, row) {
-  sheet.getRange(row, 1, 1, 5)  // 5 колонок (убрали AUTO_DETECTED)
+  sheet.getRange(row, 1, 1, 5)  // 5 колонок: Image, Item Name, Hero Name, Hero ID, Category
     .setVerticalAlignment('middle')
     .setHorizontalAlignment('center')
     .setWrap(false)
@@ -335,7 +335,7 @@ function heroMapping_updateItemsBatch_(updates) {
     const values = newRows.map(r => r.values)
     
     // Записываем все новые строки за раз
-    sheet.getRange(startRow, 1, newRows.length, 5).setValues(values)  // 5 колонок (убрали AUTO_DETECTED)
+    sheet.getRange(startRow, 1, newRows.length, 5).setValues(values)  // 5 колонок: Image, Item Name, Hero Name, Hero ID, Category
     
     // Добавляем формулы изображений для новых строк batch операцией
     const imageFormulas = newRows.map(r => {

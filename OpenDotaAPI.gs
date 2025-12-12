@@ -50,18 +50,18 @@ function openDota_fetchHeroStats(rankTier = null) {
     // OpenDota предоставляет статистику по рангам:
     // 1 = Herald, 2 = Guardian, 3 = Crusader, 4 = Archon, 5 = Legend
     // 6 = Ancient, 7 = Divine, 8 = Immortal
+    // ВАЖНО: Для High Rank используем Divine (ранг 7), так как Immortal (ранг 8) недоступен в API
+    
     const heroStats = heroes.map(hero => {
-      // Вычисляем статистику для "High Rank" (только Immortal = ранг 8)
-      // Изменено: было Ancient+Divine+Immortal (6+7+8), стало только Immortal (8)
-      const highRankPick = hero['8_pick'] || 0
-      const highRankWin = hero['8_win'] || 0
+      // Вычисляем статистику для "High Rank" (Divine = ранг 7)
+      const highRankPick = Number(hero['7_pick']) || 0
+      const highRankWin = Number(hero['7_win']) || 0
       const highRankWinRate = highRankPick > 0 ? (highRankWin / highRankPick) * 100 : 0
       
       // Вычисляем статистику для "All Ranks" (все ранги 1-8)
-      const allRanksPick = (hero['1_pick'] || 0) + (hero['2_pick'] || 0) + (hero['3_pick'] || 0) +
-                          (hero['4_pick'] || 0) + (hero['5_pick'] || 0) + highRankPick
-      const allRanksWin = (hero['1_win'] || 0) + (hero['2_win'] || 0) + (hero['3_win'] || 0) +
-                         (hero['4_win'] || 0) + (hero['5_win'] || 0) + highRankWin
+      // Используем pub_pick/pub_win напрямую - это уже включает все ранги (1-8)
+      const allRanksPick = Number(hero.pub_pick) || 0
+      const allRanksWin = Number(hero.pub_win) || 0
       const allRanksWinRate = allRanksPick > 0 ? (allRanksWin / allRanksPick) * 100 : 0
       
       // Про-статистика (pro_pick, pro_ban)
@@ -120,17 +120,37 @@ function openDota_fetchHeroStats(rankTier = null) {
       }
     })
     
+    // Логируем статистику для отладки
+    console.log(`OpenDota: totalHighRankPicks=${totalHighRankPicks}, totalAllRanksPicks=${totalAllRanksPicks}`)
+    
+    // FALLBACK: Если totalHighRankPicks = 0, используем All Ranks для расчета процентов High Rank
+    // Это лучше, чем 0, так как дает хотя бы приблизительную оценку
+    const useAllRanksForHighRank = totalHighRankPicks === 0 && totalAllRanksPicks > 0
+    
     // Рассчитываем проценты для каждого героя
     heroStats.forEach(hero => {
       if (hero.highRank) {
         // Pick Rate в процентах
-        hero.highRank.pickRatePercent = totalHighRankPicks > 0 
-          ? (hero.highRank.pickRate / totalHighRankPicks) * 100 
-          : 0
+        if (useAllRanksForHighRank) {
+          // FALLBACK: Используем All Ranks для расчета процентов High Rank
+          hero.highRank.pickRatePercent = totalAllRanksPicks > 0
+            ? (hero.highRank.pickRate / totalAllRanksPicks) * 100
+            : 0
+        } else {
+          hero.highRank.pickRatePercent = totalHighRankPicks > 0 
+            ? (hero.highRank.pickRate / totalHighRankPicks) * 100 
+            : 0
+        }
         // Contest Rate в процентах
-        hero.highRank.contestRatePercent = totalHighRankContests > 0
-          ? (hero.highRank.contestRate / totalHighRankContests) * 100
-          : 0
+        if (useAllRanksForHighRank) {
+          hero.highRank.contestRatePercent = totalAllRanksContests > 0
+            ? (hero.highRank.contestRate / totalAllRanksContests) * 100
+            : 0
+        } else {
+          hero.highRank.contestRatePercent = totalHighRankContests > 0
+            ? (hero.highRank.contestRate / totalHighRankContests) * 100
+            : 0
+        }
       }
       if (hero.allRanks) {
         // Pick Rate в процентах

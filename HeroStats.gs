@@ -537,22 +537,43 @@ function heroStats_updateAllStats() {
             }
           }
           
+          // ВАЛИДАЦИЯ: Проверяем данные перед сохранением
+          const pickRate = Number(heroStat.pickRate) || 0
+          const pickRatePercent = Number(heroStat.pickRatePercent) || 0
+          const winRate = Number(heroStat.winRate) || 0
+          const banRate = Number(heroStat.banRate) || 0
+          const contestRate = Number(heroStat.contestRate) || 0
+          const contestRatePercent = Number(heroStat.contestRatePercent) || 0
+          const matchCount = Number(heroStat.matchCount) || 0
+          const proPick = Number(heroStat.proPick) || 0
+          const proBan = Number(heroStat.proBan) || 0
+          
+          // Валидация процентов (должны быть в разумных пределах)
+          const validatedPickRatePercent = Math.max(0, Math.min(100, pickRatePercent))
+          const validatedContestRatePercent = Math.max(0, Math.min(100, contestRatePercent))
+          const validatedWinRate = Math.max(0, Math.min(100, winRate))
+          
+          // Валидация изменений (уже ограничены в коде выше, но проверяем еще раз)
+          const validatedPickRateChange7d = Math.max(-1000, Math.min(1000, pickRateChange7d))
+          const validatedPickRateChange24h = Math.max(-1000, Math.min(1000, pickRateChange24h))
+          const validatedProContestRateChange7d = Math.max(-1000, Math.min(1000, proContestRateChange7d))
+          
           const statsData = {
-            pickRate: heroStat.pickRate || 0,
-            pickRatePercent: heroStat.pickRatePercent || 0, // Процент пиков
-            winRate: heroStat.winRate || 0,
-            banRate: heroStat.banRate || 0,
-            contestRate: heroStat.contestRate || 0,
-            contestRatePercent: heroStat.contestRatePercent || 0, // Процент контестов
-            matchCount: heroStat.matchCount || 0,
+            pickRate: pickRate,
+            pickRatePercent: validatedPickRatePercent, // Процент пиков (валидирован)
+            winRate: validatedWinRate,
+            banRate: banRate,
+            contestRate: contestRate,
+            contestRatePercent: validatedContestRatePercent, // Процент контестов (валидирован)
+            matchCount: matchCount,
             // Про-статистика
-            proPick: heroStat.proPick || 0,
-            proBan: heroStat.proBan || 0,
+            proPick: proPick,
+            proBan: proBan,
             proContestRate: currentProContestRate,
-            // Изменения за 7 дней и 24 часа
-            pickRateChange7d: pickRateChange7d,  // Immortal за неделю
-            pickRateChange24h: pickRateChange24h,  // Immortal за 24 часа (для Мета сигнала)
-            proContestRateChange7d: proContestRateChange7d
+            // Изменения за 7 дней и 24 часа (валидированы)
+            pickRateChange7d: validatedPickRateChange7d,  // Immortal за неделю
+            pickRateChange24h: validatedPickRateChange24h,  // Immortal за 24 часа (для Мета сигнала)
+            proContestRateChange7d: validatedProContestRateChange7d
             // Убрано: contestRateChange7d (фейк, дублировал pickRateChange7d)
           }
           
@@ -624,22 +645,43 @@ function heroStats_updateAllStats() {
             }
           }
           
+          // ВАЛИДАЦИЯ: Проверяем данные перед сохранением
+          const pickRate = Number(heroStat.pickRate) || 0
+          const pickRatePercent = Number(heroStat.pickRatePercent) || 0
+          const winRate = Number(heroStat.winRate) || 0
+          const banRate = Number(heroStat.banRate) || 0
+          const contestRate = Number(heroStat.contestRate) || 0
+          const contestRatePercent = Number(heroStat.contestRatePercent) || 0
+          const matchCount = Number(heroStat.matchCount) || 0
+          const proPick = Number(heroStat.proPick) || 0
+          const proBan = Number(heroStat.proBan) || 0
+          
+          // Валидация процентов (должны быть в разумных пределах)
+          const validatedPickRatePercent = Math.max(0, Math.min(100, pickRatePercent))
+          const validatedContestRatePercent = Math.max(0, Math.min(100, contestRatePercent))
+          const validatedWinRate = Math.max(0, Math.min(100, winRate))
+          
+          // Валидация изменений (уже ограничены в коде выше, но проверяем еще раз)
+          const validatedPickRateChange7d = Math.max(-1000, Math.min(1000, pickRateChange7d))
+          const validatedPickRateChange24h = Math.max(-1000, Math.min(1000, pickRateChange24h))
+          const validatedProContestRateChange7d = Math.max(-1000, Math.min(1000, proContestRateChange7d))
+          
           const statsData = {
-            pickRate: heroStat.pickRate || 0,
-            pickRatePercent: heroStat.pickRatePercent || 0, // Процент пиков
-            winRate: heroStat.winRate || 0,
-            banRate: heroStat.banRate || 0,
-            contestRate: heroStat.contestRate || 0,
-            contestRatePercent: heroStat.contestRatePercent || 0, // Процент контестов (равен pickRatePercent)
-            matchCount: heroStat.matchCount || 0,
+            pickRate: pickRate,
+            pickRatePercent: validatedPickRatePercent, // Процент пиков (валидирован)
+            winRate: validatedWinRate,
+            banRate: banRate,
+            contestRate: contestRate,
+            contestRatePercent: validatedContestRatePercent, // Процент контестов (валидирован)
+            matchCount: matchCount,
             // Про-статистика
-            proPick: heroStat.proPick || 0,
-            proBan: heroStat.proBan || 0,
+            proPick: proPick,
+            proBan: proBan,
             proContestRate: currentProContestRate,
-            // Изменения за 7 дней и 24 часа
-            pickRateChange7d: pickRateChange7d,  // All Ranks за неделю
-            pickRateChange24h: pickRateChange24h,  // All Ranks за 24 часа (для Мета сигнала)
-            proContestRateChange7d: proContestRateChange7d
+            // Изменения за 7 дней и 24 часа (валидированы)
+            pickRateChange7d: validatedPickRateChange7d,  // All Ranks за неделю
+            pickRateChange24h: validatedPickRateChange24h,  // All Ranks за 24 часа (для Мета сигнала)
+            proContestRateChange7d: validatedProContestRateChange7d
             // Убрано: contestRateChange7d (фейк, дублировал pickRateChange7d)
           }
           

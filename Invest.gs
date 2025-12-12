@@ -328,7 +328,7 @@ function invest_addOrUpdatePosition_(name, qtyToAdd, buyPricePerUnit) {
 
 function invest_formatTable() {
   const sheet = getOrCreateInvestSheet_()
-  const headers = HEADERS.INVEST // 28 колонок (новая структура)
+  const headers = HEADERS.INVEST // 22 колонки
   
   if (!headers || !Array.isArray(headers) || headers.length === 0) {
     console.error('Invest: HEADERS.INVEST не определен или пуст')
@@ -373,7 +373,7 @@ function invest_formatTable() {
   }
 
   if (lastRow > 1) {
-    const profitRanges = sheet.getRange(`I2:J${lastRow}`) // Профит и Прибыль % с комиссией (было J-L)
+    const profitRanges = sheet.getRange(`I2:J${lastRow}`) // Профит и Прибыль % с комиссией
     const trendCol = getColumnIndex(INVEST_COLUMNS.TREND)
     const phaseCol = getColumnIndex(INVEST_COLUMNS.PHASE)
     const recommendationCol = getColumnIndex(INVEST_COLUMNS.RECOMMENDATION)
@@ -393,7 +393,7 @@ function invest_formatTable() {
   }
 
   // Заморозка строки уже выполнена в formatTableBase_()
-  // Добавляем колонку чекбокса «Продать» если отсутствует (убрали «Купить?»)
+  // Добавляем колонку чекбокса «Продать» если отсутствует
   const lastCol = sheet.getLastColumn()
   const sellHeader = 'Продать'
   let sellCol = null
