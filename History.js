@@ -88,8 +88,7 @@ function history_formatTable() {
     const pickRateCol = getColumnIndex(HISTORY_COLUMNS.PICK_RATE_IMMORTAL)
     sheet.getRange(DATA_START_ROW, pickRateCol, lastRow - 1, 1)
       .setNumberFormat(NUMBER_FORMATS.PERCENT)
-    // T (Win Rate current) - процент
-    const winRateCol = getColumnIndex(HISTORY_COLUMNS.WIN_RATE_CURRENT)
+    // T (Win Rate current) - процент (winRateCol уже объявлен выше)
     sheet.getRange(DATA_START_ROW, winRateCol, lastRow - 1, 1)
       .setNumberFormat(NUMBER_FORMATS.PERCENT)
   }

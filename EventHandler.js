@@ -7,7 +7,7 @@
 // Обработчик изменения листа для автоматической обработки чекбоксов
 // Отслеживает чекбоксы "Купить" (History, колонка E) и "Продать" (Invest, колонка V)
 function onEdit(e) {
-  if (!e?.range) return
+  if (!e || !e.range) return
   
   const sheet = e.source.getActiveSheet()
   if (!sheet) return

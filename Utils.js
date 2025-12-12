@@ -1106,8 +1106,8 @@ function insertLogRowUniversal_(sheet, values, formats = {}) {
     sheet.getRange(insertRow, 1).setNumberFormat(formats.dateFormat)
   }
   
-  const horizontalAlign = formats.alignments?.horizontal || 'center'
-  const verticalAlign = formats.alignments?.vertical || 'middle'
+  const horizontalAlign = (formats.alignments && formats.alignments.horizontal) || 'center'
+  const verticalAlign = (formats.alignments && formats.alignments.vertical) || 'middle'
   sheet.getRange(insertRow, 1, 1, numCols).setVerticalAlignment(verticalAlign).setHorizontalAlignment(horizontalAlign)
 }
 
